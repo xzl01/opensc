@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -56,7 +56,7 @@ static void buf_init(BUFHAN * bp, FILE * fp, const char *saved_string)
 
 static void buf_addch(BUFHAN * bp, char ch)
 {
-	if (bp->bufcur >= bp->bufmax) {
+	if (bp->bufcur + 1 >= bp->bufmax) {
 		char *p = (char *) realloc(bp->buf, bp->bufmax + 256);
 		if (!p)
 			return;
@@ -144,6 +144,12 @@ static int scconf_lex_engine(scconf_parser * parser, BUFHAN * bp)
 			continue;
 		case ',':
 		case '{':
+			if (parser->nested_blocks >= DEPTH_LIMIT) {
+				/* reached the limit, this whole block */
+				scconf_skip_block(parser);
+				continue;
+			}
+			/* fall through */
 		case '}':
 		case '=':
 		case ';':

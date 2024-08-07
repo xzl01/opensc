@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -68,7 +68,7 @@ static const char *option_help[] = {
 	"List the on-card PKCS#15 applications",
 	"List the SDOs with the <arg> tag in the current ADF",
 	"Wait for card insertion",
-	"Verbose operation. Use several times to enable debug output.",
+	"Verbose operation, may be used several times",
 	NULL
 };
 
@@ -124,20 +124,21 @@ static int list_sdos(char *sdo_tag)
 {
 	struct iasecc_sdo sdo;
 	struct iasecc_se_info se;
-	unsigned sdo_class = 0;
+	unsigned char sdo_class = 0;
+	long sdo_class_l;
 	int rv, ii, jj;
 
 	if (!sdo_tag)
 		goto usage;
 
 	if (*sdo_tag == 'x' || *sdo_tag == 'X')
-		sdo_class = strtol(sdo_tag + 1, NULL, 16);
+		sdo_class_l = strtol(sdo_tag + 1, NULL, 16);
 	else if ((strlen(sdo_tag) > 2) && (*(sdo_tag + 1) == 'x' || *(sdo_tag + 1) == 'X'))
-		sdo_class = strtol(sdo_tag + 2, NULL, 16);
+		sdo_class_l = strtol(sdo_tag + 2, NULL, 16);
 	else
-		sdo_class = strtol(sdo_tag, NULL, 10);
+		sdo_class_l = strtol(sdo_tag, NULL, 10);
 
-	sdo_class &= 0x7F;
+	sdo_class = sdo_class_l & 0x7F;
 	if (sdo_class == IASECC_SDO_CLASS_SE)   {
 		for (ii=1; ii<0x20; ii++)   {
 			memset(&se, 0, sizeof(se));
@@ -237,6 +238,9 @@ int main(int argc, char *argv[])
 
 	memset(&ctx_param, 0, sizeof(sc_context_param_t));
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r != SC_SUCCESS) {
@@ -247,7 +251,7 @@ int main(int argc, char *argv[])
 	if (action_count <= 0)
 		goto end;
 
-	err = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);
+	err = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (err)
 		goto end;
 

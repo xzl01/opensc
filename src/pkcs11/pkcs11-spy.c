@@ -13,7 +13,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307,
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301
  * USA
  */
 
@@ -32,6 +32,10 @@
 #include <sys/time.h>
 #endif
 #include <time.h>
+#include <unistd.h>
+#endif
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
 #endif
 
 #define CRYPTOKI_EXPORTS
@@ -317,14 +321,17 @@ enter(const char *function)
 
 	fprintf(spy_output, "\n%d: %s\n", count++, function);
 #ifdef _WIN32
-        GetLocalTime(&st);
-        fprintf(spy_output, "%i-%02i-%02i %02i:%02i:%02i.%03i\n", st.wYear, st.wMonth, st.wDay,
-			st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+	GetLocalTime(&st);
+	fprintf(spy_output, "P:%lu; T:%lu %i-%02i-%02i %02i:%02i:%02i.%03i\n",
+			(unsigned long)GetCurrentProcessId(), (unsigned long)GetCurrentThreadId(),
+			st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
 #else
 	gettimeofday (&tv, NULL);
 	tm = localtime (&tv.tv_sec);
 	strftime (time_string, sizeof(time_string), "%F %H:%M:%S", tm);
-	fprintf(spy_output, "%s.%03ld\n", time_string, (long)tv.tv_usec / 1000);
+	fprintf(spy_output, "P:%lu; T:0x%lu %s.%03ld\n",
+			(unsigned long)getpid(), (unsigned long)pthread_self(),
+			time_string, (long)tv.tv_usec / 1000);
 #endif
 
 }
@@ -332,7 +339,7 @@ enter(const char *function)
 static CK_RV
 retne(CK_RV rv)
 {
-	fprintf(spy_output, "Returned:  %ld %s\n", (unsigned long) rv, lookup_enum ( RV_T, rv ));
+	fprintf(spy_output, "Returned:  %ld %s\n", (unsigned long) rv, lookup_enum (RV_T, rv ));
 	fflush(spy_output);
 	return rv;
 }
@@ -404,13 +411,26 @@ static void
 spy_dump_mechanism_in(const char *name, CK_MECHANISM_PTR pMechanism)
 {
 	char param_name[64];
+	const char *mec_name;
 
 	if (!pMechanism) {
 		fprintf(spy_output, "[in] %s = NULL\n", name);
 		return;
 	}
 
-	fprintf(spy_output, "[in] %s->type = %s\n", name, lookup_enum(MEC_T, pMechanism->mechanism));
+	mec_name = lookup_enum(MEC_T, pMechanism->mechanism);
+	if (mec_name)
+		fprintf(spy_output, "[in] %s->type = %s\n", name, mec_name);
+	else {
+		size_t needed = snprintf(NULL, 0, "0x%08lX", pMechanism->mechanism) + 1;
+		char *buffer = malloc(needed);
+		if (buffer) {
+			sprintf(buffer, "0x%08lX", pMechanism->mechanism);
+			fprintf(spy_output, "[in] %s->type = %s\n", name, buffer);
+			free(buffer);
+		}
+	}
+
 	switch (pMechanism->mechanism) {
 	case CKM_AES_GCM:
 		if (pMechanism->pParameter != NULL) {
@@ -520,6 +540,22 @@ print_ptr_in(const char *name, CK_VOID_PTR ptr)
 {
  	fprintf(spy_output, "[in] %s = %p\n", name, ptr);
 }
+
+#define FPRINTF_LOOKUP_ENUM(fmt, category, type)\
+do {\
+        const char *name = lookup_enum((category), (type));\
+        if (name)\
+                fprintf(spy_output, (fmt), (name));\
+        else {\
+                size_t needed = snprintf(NULL, 0, "0x%08lX", (type)) + 1;\
+                char *buffer = malloc(needed);\
+                if (buffer) {\
+                        sprintf(buffer, "0x%08lX", (type));\
+                        fprintf(spy_output, (fmt), buffer);\
+                        free(buffer);\
+                }\
+        }\
+} while(0)
 
 CK_RV C_GetFunctionList
 (CK_FUNCTION_LIST_PTR_PTR ppFunctionList)
@@ -657,14 +693,10 @@ C_GetMechanismInfo(CK_SLOT_ID  slotID, CK_MECHANISM_TYPE type,
 		CK_MECHANISM_INFO_PTR pInfo)
 {
 	CK_RV rv;
-	const char *name = lookup_enum(MEC_T, type);
 
 	enter("C_GetMechanismInfo");
 	spy_dump_ulong_in("slotID", slotID);
-	if (name)
-		fprintf(spy_output, "[in] type = %30s\n", name);
-	else
-		fprintf(spy_output, "[in] type = Unknown Mechanism (%08lx)\n", type);
+	FPRINTF_LOOKUP_ENUM("[in] type = %s\n", MEC_T, type);
 
 	rv = po->C_GetMechanismInfo(slotID, type, pInfo);
 	if(rv == CKR_OK) {
@@ -807,8 +839,7 @@ C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
 
 	enter("C_Login");
 	spy_dump_ulong_in("hSession", hSession);
-	fprintf(spy_output, "[in] userType = %s\n",
-			lookup_enum(USR_T, userType));
+	FPRINTF_LOOKUP_ENUM("[in] userType = %s\n", USR_T, userType);
 	spy_dump_string_in("pPin[ulPinLen]", pPin, ulPinLen);
 	rv = po->C_Login(hSession, userType, pPin, ulPinLen);
 	return retne(rv);
@@ -1571,6 +1602,21 @@ C_GetInterfaceList(CK_INTERFACE_PTR pInterfacesList, CK_ULONG_PTR pulCount)
 	if (po->version.major < 3) {
 		fprintf(spy_output, "[compat]\n");
 
+		if (pulCount == NULL_PTR)
+			return retne(CKR_ARGUMENTS_BAD);
+
+		if (pInterfacesList == NULL_PTR) {
+			*pulCount = NUM_INTERFACES;
+			spy_dump_ulong_out("*pulCount", *pulCount);
+			return retne(CKR_OK);
+		}
+		spy_dump_ulong_in("*pulCount", *pulCount);
+		if (*pulCount < NUM_INTERFACES) {
+			*pulCount = NUM_INTERFACES;
+			spy_dump_ulong_out("*pulCount", *pulCount);
+			return retne(CKR_BUFFER_TOO_SMALL);
+		}
+
 		memcpy(pInterfacesList, compat_interfaces, NUM_INTERFACES * sizeof(CK_INTERFACE));
 		*pulCount = NUM_INTERFACES;
 
@@ -1612,7 +1658,11 @@ C_GetInterface(CK_UTF8CHAR_PTR pInterfaceName, CK_VERSION_PTR pVersion,
 	if (po->version.major < 3) {
 		fprintf(spy_output, "[compat]\n");
 	}
-	spy_dump_string_in("pInterfaceName", pInterfaceName, strlen((char *)pInterfaceName));
+	if (pInterfaceName != NULL) {
+		spy_dump_string_in("pInterfaceName", pInterfaceName, strlen((char *)pInterfaceName));
+	} else {
+		fprintf(spy_output, "[in] pInterfaceName = NULL\n");
+	}
 	if (pVersion != NULL) {
 		fprintf(spy_output, "[in] pVersion = %d.%d\n", pVersion->major, pVersion->minor);
 	} else {
@@ -1622,7 +1672,7 @@ C_GetInterface(CK_UTF8CHAR_PTR pInterfaceName, CK_VERSION_PTR pVersion,
 		(flags & CKF_INTERFACE_FORK_SAFE ? "CKF_INTERFACE_FORK_SAFE" : ""));
 	if (po->version.major >= 3) {
 		rv = po->C_GetInterface(pInterfaceName, pVersion, ppInterface, flags);
-		if (ppInterface != NULL) {
+		if (rv == CKR_OK && ppInterface != NULL) {
 			spy_interface_function_list(*ppInterface);
 		}
 	} else {
@@ -1647,8 +1697,7 @@ C_LoginUser(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
 
 	enter("C_LoginUser");
 	spy_dump_ulong_in("hSession", hSession);
-	fprintf(spy_output, "[in] userType = %s\n",
-			lookup_enum(USR_T, userType));
+	FPRINTF_LOOKUP_ENUM("[in] userType = %s\n", USR_T, userType);
 	spy_dump_string_in("pPin[ulPinLen]", pPin, ulPinLen);
 	spy_dump_string_in("pUsername[ulUsernameLen]", pUsername, ulUsernameLen);
 	rv = po->C_LoginUser(hSession, userType, pPin, ulPinLen, pUsername, ulUsernameLen);

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -583,9 +583,9 @@ int paccess_main(struct sc_context *ctx, sc_card_t *card, struct gengetopt_args_
                     SC_ERROR_INVALID_ARGUMENTS, "Could not parse private key.\n");
         }
 
-        certs = calloc(sizeof *certs, cmdline->certificate_given + 1);
-        certs_lens = calloc(sizeof *certs_lens,
-                cmdline->certificate_given + 1);
+        certs = calloc(cmdline->certificate_given + 1, sizeof *certs);
+        certs_lens = calloc(cmdline->certificate_given + 1,
+                sizeof *certs_lens);
         if (!certs || !certs_lens) {
             SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE_TOOL, SC_ERROR_NOT_ENOUGH_MEMORY,
                     "Internal error.");
@@ -598,9 +598,6 @@ int paccess_main(struct sc_context *ctx, sc_card_t *card, struct gengetopt_args_
             }
         }
 
-#ifdef ENABLE_OPENPACE
-        EAC_init();
-#endif
         SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE_TOOL,
                 perform_terminal_authentication(card,
                     (const unsigned char **) certs, certs_lens,
@@ -858,6 +855,9 @@ main(int argc, char **argv)
     memset(&ctx_param, 0, sizeof(ctx_param));
     ctx_param.ver      = 0;
     ctx_param.app_name = app_name;
+    ctx_param.debug    = cmdline.verbose_given;
+    if (cmdline.verbose_given > 1)
+        ctx_param.debug_file = stderr;
 
     r = sc_context_create(&ctx, &ctx_param);
     if (r) {
@@ -865,16 +865,11 @@ main(int argc, char **argv)
         exit(1);
     }
 
-    if (cmdline.verbose_given > 1) {
-        ctx->debug = cmdline.verbose_given;
-        sc_ctx_log_to_file(ctx, "stderr");
-    }
-
     r = sc_set_card_driver(ctx, "default");
     SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE_TOOL, r,
             "Error selecting card driver.");
 
-    r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0, cmdline.verbose_given);
+    r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0);
     SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE_TOOL, r,
             "Error connecting to card.");
 

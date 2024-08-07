@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /* This example shows how to use the library functions perform_pace to
@@ -26,7 +26,6 @@
 #include "config.h"
 #endif
 
-#ifdef ENABLE_OPENPACE
 #include "libopensc/sm.h"
 #include "sm/sm-iso.h"
 #include "sm/sm-eac.h"
@@ -80,10 +79,6 @@ main (int argc, char **argv)
 		exit(1);
 	}
 
-	/* initialize OpenPACE */
-	EAC_init();
-
-
 	/* Now we try to change the PIN. Therefore we need to establish a SM channel
 	 * with PACE.
 	 *
@@ -135,14 +130,7 @@ err:
 	sc_reset(card, 1);
 	sc_disconnect_card(card);
 	sc_release_context(ctx);
-	EAC_cleanup();
 
 	return -r;
 }
-#else
-int
-main (int argc, char **argv)
-{
-	return 1;
-}
-#endif
+

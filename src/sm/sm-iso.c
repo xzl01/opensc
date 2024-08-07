@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -55,23 +55,22 @@ static const struct sc_asn1_entry c_sm_rapdu[] = {
 };
 
 static int
-add_iso_pad(const u8 *data, size_t datalen, int block_size, u8 **padded)
+add_iso_pad(const u8 *data, size_t datalen, size_t block_size, u8 **padded)
 {
 	u8 *p;
-	size_t p_len;
+	int p_len;
 
 	if (!padded)
 		return SC_ERROR_INVALID_ARGUMENTS;
 
 	/* calculate length of padded message */
-	p_len = (datalen / block_size) * block_size + block_size;
+	p_len = (int)((datalen / block_size) * block_size + block_size);
 
 	p = realloc(*padded, p_len);
 	if (!p)
 		return SC_ERROR_OUT_OF_MEMORY;
 
 	if (*padded != data)
-		/* Flawfinder: ignore */
 		memcpy(p, data, datalen);
 
 	*padded = p;
@@ -102,7 +101,7 @@ add_padding(const struct iso_sm_ctx *ctx, const u8 *data, size_t datalen,
 					*padded = NULL;
 				}
 			}
-			return datalen;
+			return (int)datalen;
 		case SM_ISO_PADDING:
 			return add_iso_pad(data, datalen, ctx->block_length, padded);
 		default:
@@ -141,7 +140,7 @@ rm_padding(u8 padding_indicator, const u8 *data, size_t datalen)
 			return SC_ERROR_NOT_SUPPORTED;
 	}
 
-	return len;
+	return (int)len;
 }
 
 static int format_le(size_t le, struct sc_asn1_entry *le_entry,
@@ -181,23 +180,23 @@ static int format_le(size_t le, struct sc_asn1_entry *le_entry,
 
 static int prefix_buf(u8 prefix, u8 *buf, size_t buflen, u8 **cat)
 {
-	u8 *p;
+	u8 *p = NULL;
+	int ptr_same = *cat == buf;
 
 	p = realloc(*cat, buflen + 1);
 	if (!p)
 		return SC_ERROR_OUT_OF_MEMORY;
 
-	if (*cat == buf) {
+	if (ptr_same) {
 		memmove(p + 1, p, buflen);
 	} else {
-		/* Flawfinder: ignore */
 		memcpy(p + 1, buf, buflen);
 	}
 	p[0] = prefix;
 
 	*cat = p;
 
-	return buflen + 1;
+	return (int)buflen + 1;
 }
 
 static int format_data(sc_card_t *card, const struct iso_sm_ctx *ctx,
@@ -439,7 +438,6 @@ static int sm_encrypt(const struct iso_sm_ctx *ctx, sc_card_t *card,
 			goto err;
 		}
 		mac_data = p;
-		/* Flawfinder: ignore */
 		memcpy(mac_data + mac_data_len, asn1, asn1_len);
 		mac_data_len += asn1_len;
 		r = add_padding(ctx, mac_data, mac_data_len, &mac_data);
@@ -476,11 +474,15 @@ static int sm_encrypt(const struct iso_sm_ctx *ctx, sc_card_t *card,
 	if (apdu->cse & SC_APDU_EXT) {
 		sm_apdu->cse = SC_APDU_CASE_4_EXT;
 		sm_apdu->resplen = 4 + 2 + mac_len + 2 + 3 + ((apdu->resplen+1)/ctx->block_length+1)*ctx->block_length;
+		if (sm_apdu->resplen > SC_MAX_EXT_APDU_RESP_SIZE)
+			sm_apdu->resplen = SC_MAX_EXT_APDU_RESP_SIZE;
 	} else {
 		sm_apdu->cse = SC_APDU_CASE_4_SHORT;
 		sm_apdu->resplen = 4 + 2 + mac_len + 2 + 2 + ((apdu->resplen+1)/ctx->block_length+1)*ctx->block_length;
+		if (sm_apdu->resplen > SC_MAX_APDU_RESP_SIZE)
+			sm_apdu->resplen = SC_MAX_APDU_RESP_SIZE;
 	}
-	resp_data = calloc(sm_apdu->resplen, 1);
+	resp_data = calloc(1, sm_apdu->resplen);
 	if (!resp_data) {
 		r = SC_ERROR_OUT_OF_MEMORY;
 		goto err;
@@ -545,7 +547,7 @@ static int sm_decrypt(const struct iso_sm_ctx *ctx, sc_card_t *card,
 		if (r < 0) {
 			goto err;
 		}
-		
+
 		r = ctx->verify_authentication(card, ctx, mac, mac_len,
 				mac_data, r);
 		if (r < 0)
@@ -586,7 +588,6 @@ static int sm_decrypt(const struct iso_sm_ctx *ctx, sc_card_t *card,
 			r = SC_ERROR_OUT_OF_MEMORY;
 			goto err;
 		}
-		/* Flawfinder: ignore */
 		memcpy(apdu->resp, data, r);
 		apdu->resplen = r;
 	} else {

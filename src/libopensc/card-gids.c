@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /*
@@ -189,7 +189,7 @@ static int gids_get_identifiers(sc_card_t* card, u8* masterfile, size_t masterfi
 		if (strcmp(directory, records[i].directory) == 0 && strcmp(filename, records[i].filename) == 0) {
 			*fileIdentifier = records[i].fileIdentifier;
 			*dataObjectIdentifier = records[i].dataObjectIdentifier;
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 		"Identifiers of %s %s is fileIdentifier=%x, dataObjectIdentifier=%x\n", directory, filename, *fileIdentifier, *dataObjectIdentifier);
 			return 0;
 		}
@@ -233,7 +233,7 @@ static int gids_get_DO(sc_card_t* card, int fileIdentifier, int dataObjectIdenti
 	u8 buffer[MAX_GIDS_FILE_SIZE];
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "Got args: fileIdentifier=%x, dataObjectIdentifier=%x, response=%p, responselen=%"SC_FORMAT_LEN_SIZE_T"u\n",
 		 fileIdentifier, dataObjectIdentifier, response,
 		 responselen ? *responselen : 0);
@@ -272,7 +272,7 @@ static int gids_put_DO(sc_card_t* card, int fileIdentifier, int dataObjectIdenti
 	u8 buffer[SC_MAX_EXT_APDU_BUFFER_SIZE];
 	u8* p = buffer;
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "Got args: fileIdentifier=%x, dataObjectIdentifier=%x, data=%p, datalen=%"SC_FORMAT_LEN_SIZE_T"u\n",
 		 fileIdentifier, dataObjectIdentifier, data, datalen);
 
@@ -300,7 +300,7 @@ static int gids_select_aid(sc_card_t* card, u8* aid, size_t aidlen, u8* response
 	int r;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "Got args: aid=%p, aidlen=%"SC_FORMAT_LEN_SIZE_T"u, response=%p, responselen=%"SC_FORMAT_LEN_SIZE_T"u\n",
 		 aid, aidlen, response, responselen ? *responselen : 0);
 
@@ -465,7 +465,7 @@ static int gids_create_file(sc_card_t *card, char* directory, char* filename) {
 	struct gids_private_data* privatedata = (struct gids_private_data*) card->drv_data;
 	int fileIdentifier, dataObjectIdentifier;
 	size_t records;
-	int offset;
+	size_t offset;
 	gids_mf_record_t* record;
 
 	r = gids_find_available_DO(card, privatedata->masterfile, privatedata->masterfilesize, &fileIdentifier, &dataObjectIdentifier);
@@ -573,7 +573,7 @@ static int gids_get_pin_status(sc_card_t *card, int pinreference, int *tries_lef
 			*max_tries = p[0];
 	}
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		"Pin information for PIN 0x%x: triesleft=%d trieslimit=%d\n", pinreference, (tries_left?*tries_left:-1), (max_tries?*max_tries:-1));
 	LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 }
@@ -866,7 +866,7 @@ gids_decipher(struct sc_card *card,
 	 * P1:  0x80  Resp: Plain value
 	 * P2:  0x86  Cmd: Padding indicator byte followed by cryptogram
 	 * Implementation by Microsoft indicates that Padding indicator
-	 * must not be sent. It may only be needed if Secure Messaging 
+	 * must not be sent. It may only be needed if Secure Messaging
 	 * is used. This driver does not support SM.
 	 */
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_4, 0x2A, 0x80, 0x86);
@@ -883,7 +883,7 @@ gids_decipher(struct sc_card *card,
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 
 	if (apdu.sw1 == 0x90 && apdu.sw2 == 0x00)
-		LOG_FUNC_RETURN(card->ctx, apdu.resplen);
+		LOG_FUNC_RETURN(card->ctx, (int)apdu.resplen);
 
 	LOG_FUNC_RETURN(card->ctx, sc_check_sw(card, apdu.sw1, apdu.sw2));
 }
@@ -924,7 +924,7 @@ static int gids_read_public_key (struct sc_card *card , unsigned int algorithm,
 	size_t buffersize = sizeof(buffer);
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "Got args: key_reference=%x, response=%p, responselen=%"SC_FORMAT_LEN_SIZE_T"u\n",
 		 key_reference, response, responselen ? *responselen : 0);
 
@@ -1048,7 +1048,7 @@ gids_pin_cmd(struct sc_card *card, struct sc_pin_cmd_data *data, int *tries_left
 
 // used to read existing certificates
 static int gids_read_binary(sc_card_t *card, unsigned int offset,
-		unsigned char *buf, size_t count, unsigned long flags) {
+		unsigned char *buf, size_t count, unsigned long *flags) {
 	struct gids_private_data *data = (struct gids_private_data *) card->drv_data;
 	struct sc_context *ctx = card->ctx;
 	int r;
@@ -1069,19 +1069,11 @@ static int gids_read_binary(sc_card_t *card, unsigned int offset,
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_DATA);
 		}
 		if (buffer[0] == 1 && buffer[1] == 0) {
-			size_t expectedsize = buffer[2] + buffer[3] * 0x100;
-			data->buffersize = sizeof(data->buffer);
-			r = sc_decompress(data->buffer, &(data->buffersize), buffer+4, buffersize-4, COMPRESSION_ZLIB);
-			if (r != SC_SUCCESS) {
-				sc_log(card->ctx,  "Zlib error: %d", r);
-				LOG_FUNC_RETURN(card->ctx, r);
-			}
-			if (data->buffersize != expectedsize) {
-				sc_log(card->ctx, 
-					 "expected size: %"SC_FORMAT_LEN_SIZE_T"u real size: %"SC_FORMAT_LEN_SIZE_T"u",
-					 expectedsize, data->buffersize);
-				LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_DATA);
-			}
+			if (flags)
+				*flags |= SC_FILE_FLAG_COMPRESSED_ZLIB;
+			/* compressed data are starting on position buffer + 4 */
+			data->buffersize = sizeof(data->buffer) - 4;
+			memcpy(data->buffer, buffer + 4, buffersize);
 		} else {
 			sc_log(card->ctx,  "unknown compression method %d", buffer[0] + (buffer[1] <<8));
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_DATA);
@@ -1196,7 +1188,7 @@ gids_select_key_reference(sc_card_t *card, sc_pkcs15_prkey_info_t* key_info) {
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_ARGUMENTS);
 		}
 		if (i > recordsnum) {
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 				 "container num is not allowed %"SC_FORMAT_LEN_SIZE_T"u %"SC_FORMAT_LEN_SIZE_T"u",
 				 i, recordsnum);
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_ARGUMENTS);
@@ -1959,14 +1951,9 @@ static int gids_authenticate_admin(sc_card_t *card, u8* key) {
 	u8 buffer3[16+16+8];
 	int buffer3size = 40;
 	sc_apdu_t apdu;
-	const EVP_CIPHER *cipher;
+	EVP_CIPHER *cipher;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	// this is CBC instead of ECB
-	cipher = EVP_des_ede3_cbc();
-	if (!cipher) {
-		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
-	}
 
 	// select the admin key
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_3, INS_MANAGE_SECURITY_ENVIRONMENT, 0xC1, 0xA4);
@@ -2008,23 +1995,28 @@ static int gids_authenticate_admin(sc_card_t *card, u8* key) {
 	if (ctx == NULL) {
 	    LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
-
+	cipher = sc_evp_cipher(card->ctx, "DES-EDE3-CBC");
 	if (!EVP_EncryptInit(ctx, cipher, key, NULL)) {
 		EVP_CIPHER_CTX_free(ctx);
+		sc_evp_cipher_free(cipher);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
 	EVP_CIPHER_CTX_set_padding(ctx,0);
 	if (!EVP_EncryptUpdate(ctx, buffer2, &buffer2size, buffer, sizeof(buffer))) {
 		EVP_CIPHER_CTX_free(ctx);
+		sc_evp_cipher_free(cipher);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
 
 	if(!EVP_EncryptFinal(ctx, buffer2+buffer2size, &buffer2size)) {
 		EVP_CIPHER_CTX_free(ctx);
+		sc_evp_cipher_free(cipher);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
 	EVP_CIPHER_CTX_free(ctx);
 	ctx = NULL;
+	sc_evp_cipher_free(cipher);
+	cipher = NULL;
 	// send it to the card
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_4, INS_GENERAL_AUTHENTICATE, 0x00, 0x00);
 	apdu.lc = sizeof(apduSendReponse);
@@ -2036,7 +2028,7 @@ static int gids_authenticate_admin(sc_card_t *card, u8* key) {
 	r = sc_transmit_apdu(card, &apdu);
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 	LOG_TEST_RET(card->ctx,  sc_check_sw(card, apdu.sw1, apdu.sw2), "invalid return");
-	
+
 	if (apdu.resplen != 44)
 	{
 		sc_log(card->ctx,  "Expecting a response len of 44 - found %d",(int) apdu.resplen);
@@ -2047,36 +2039,48 @@ static int gids_authenticate_admin(sc_card_t *card, u8* key) {
 	if (ctx == NULL) {
 	    LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
+	cipher = sc_evp_cipher(card->ctx, "DES-EDE3-CBC");
 	if (!EVP_DecryptInit(ctx, cipher, key, NULL)) {
+		sc_evp_cipher_free(cipher);
 		EVP_CIPHER_CTX_free(ctx);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
 	EVP_CIPHER_CTX_set_padding(ctx,0);
-	if (!EVP_DecryptUpdate(ctx, buffer3, &buffer3size, apdu.resp + 4, apdu.resplen - 4)) {
+	if (!EVP_DecryptUpdate(ctx, buffer3, &buffer3size, apdu.resp + 4, (int)apdu.resplen - 4)) {
 		sc_log(card->ctx,  "unable to decrypt data");
+		sc_evp_cipher_free(cipher);
 		EVP_CIPHER_CTX_free(ctx);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_PIN_CODE_INCORRECT);
 	}
 	if(!EVP_DecryptFinal(ctx, buffer3+buffer3size, &buffer3size)) {
 		sc_log(card->ctx,  "unable to decrypt final data");
+		sc_evp_cipher_free(cipher);
 		EVP_CIPHER_CTX_free(ctx);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_PIN_CODE_INCORRECT);
 	}
 	sc_log(card->ctx,  "data has been decrypted using the key");
 	if (memcmp(buffer3, randomR1, 16) != 0) {
 		sc_log(card->ctx,  "R1 doesn't match");
+		sc_evp_cipher_free(cipher);
+		EVP_CIPHER_CTX_free(ctx);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_PIN_CODE_INCORRECT);
 	}
 	if (memcmp(buffer3 + 16, randomR2, 16) != 0) {
 		sc_log(card->ctx,  "R2 doesn't match");
+		sc_evp_cipher_free(cipher);
+		EVP_CIPHER_CTX_free(ctx);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_PIN_CODE_INCORRECT);
 	}
 	if (buffer[39] != 0x80) {
 		sc_log(card->ctx,  "Padding not found");
+		sc_evp_cipher_free(cipher);
+		EVP_CIPHER_CTX_free(ctx);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_PIN_CODE_INCORRECT);
 	}
 	EVP_CIPHER_CTX_free(ctx);
 	ctx = NULL;
+	sc_evp_cipher_free(cipher);
+	cipher = NULL;
 
 	LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 #endif

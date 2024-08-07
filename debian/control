@@ -8,6 +8,7 @@ Build-Depends: bash-completion,
                docbook-xsl,
                flex,
                help2man,
+               libeac-dev,
                libglib2.0-dev,
                libltdl3-dev,
                libpcsclite-dev (>= 1.2.9-beta1),
@@ -57,7 +58,7 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Replaces: libopensc2 (<< 0.12.0)
 Breaks: libopensc2 (<< 0.12.0)
-Description: Smart card utilities with support for PKCS#15 compatible cards
+Description: Smart card utilities (PKCS#11 module)
  OpenSC provides a set of libraries and utilities to access smart
  cards.  It mainly focuses on cards that support cryptographic
  operations. It facilitates their use in security applications such as

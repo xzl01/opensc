@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -37,7 +37,10 @@
 #include "sc-pkcs11.h"
 #include "ui/notify.h"
 
+#ifdef ENABLE_OPENSSL
+#include <openssl/crypto.h>
 #include "libopensc/sc-ossl-compat.h"
+#endif
 #ifdef ENABLE_OPENPACE
 #include <eac/eac.h>
 #endif
@@ -56,6 +59,7 @@ pid_t initialized_pid = (pid_t)-1;
 static int in_finalize = 0;
 extern CK_FUNCTION_LIST pkcs11_function_list;
 extern CK_FUNCTION_LIST_3_0 pkcs11_function_list_3_0;
+int nesting = 0;
 
 #ifdef PKCS11_THREAD_LOCKING
 
@@ -248,7 +252,7 @@ __attribute__((destructor))
 int module_close()
 {
 	sc_notify_close();
-#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE)
+#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE) && !defined(LIBRESSL_VERSION_NUMBER)
 	CRYPTO_secure_malloc_done();
 #endif
 #ifdef ENABLE_OPENPACE
@@ -287,27 +291,47 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 {
 	CK_RV rv;
 #if !defined(_WIN32)
-	pid_t current_pid = getpid();
+	pid_t current_pid;
 #endif
 	int rc;
 	sc_context_param_t ctx_opts;
 
 #if !defined(_WIN32)
 	/* Handle fork() exception */
+	C_INITIALIZE_M_LOCK
+	current_pid = getpid();
 	if (current_pid != initialized_pid) {
-		if (context)
+		if (context && CKR_OK == sc_pkcs11_lock()) {
 			context->flags |= SC_CTX_FLAG_TERMINATE;
+			sc_pkcs11_unlock();
+		}
 		C_Finalize(NULL_PTR);
 	}
 	initialized_pid = current_pid;
 	in_finalize = 0;
+	C_INITIALIZE_M_UNLOCK
 #endif
+
+	/* protect from nesting */
+	C_INITIALIZE_M_LOCK
+	nesting++;
+	if (nesting > 1) {
+		nesting--;
+		C_INITIALIZE_M_UNLOCK
+		return CKR_GENERAL_ERROR;
+	}
+	C_INITIALIZE_M_UNLOCK
+	/* protect from nesting */
 
 	/* protect from multiple threads tryng to setup locking */
 	C_INITIALIZE_M_LOCK
 
 	if (context != NULL) {
-		sc_log(context, "C_Initialize(): Cryptoki already initialized\n");
+		if (CKR_OK == sc_pkcs11_lock()) {
+			sc_log(context, "C_Initialize(): Cryptoki already initialized\n");
+			sc_pkcs11_unlock();
+		}
+		nesting--;
 		C_INITIALIZE_M_UNLOCK
 		return CKR_CRYPTOKI_ALREADY_INITIALIZED;
 	}
@@ -349,7 +373,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 
 out:
 	if (context != NULL)
-		sc_log(context, "C_Initialize() = %s", lookup_enum ( RV_T, rv ));
+		SC_LOG_RV("C_Initialize() = %s", rv);
 
 	if (rv != CKR_OK) {
 		if (context != NULL) {
@@ -361,6 +385,7 @@ out:
 	}
 
 	/* protect from multiple threads tryng to setup locking */
+	nesting--;
 	C_INITIALIZE_M_UNLOCK
 
 	return rv;
@@ -591,6 +616,7 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
 	struct sc_pkcs11_slot *slot = NULL;
 	sc_timestamp_t now;
+	const char *name;
 	CK_RV rv;
 
 	if (pInfo == NULL_PTR)
@@ -613,7 +639,7 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 
 	rv = slot_get_slot(slotID, &slot);
 	DEBUG_VSS(slot, "C_GetSlotInfo found");
-	sc_log(context, "C_GetSlotInfo() get slot rv %s", lookup_enum( RV_T, rv));
+	SC_LOG_RV("C_GetSlotInfo() get slot rv %s", rv);
 	if (rv == CKR_OK) {
 		if (slot->reader == NULL) {
 			rv = CKR_TOKEN_NOT_PRESENT;
@@ -640,7 +666,12 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 		memcpy(pInfo, &slot->slot_info, sizeof(CK_SLOT_INFO));
 
 	sc_log(context, "C_GetSlotInfo() flags 0x%lX", pInfo->flags);
-	sc_log(context, "C_GetSlotInfo(0x%lx) = %s", slotID, lookup_enum( RV_T, rv));
+
+	name = lookup_enum(RV_T, rv);
+	if (name)
+		sc_log(context, "C_GetSlotInfo(0x%lx) = %s", slotID, name);
+	else
+		sc_log(context, "C_GetSlotInfo(0x%lx) = 0x%08lX", slotID, rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -696,13 +727,32 @@ CK_RV C_InitToken(CK_SLOT_ID slotID,
 {
 	struct sc_pkcs11_session *session;
 	struct sc_pkcs11_slot *slot;
+	unsigned char *label, *cpo;
 	CK_RV rv;
 	unsigned int i;
 
-	sc_log(context, "C_InitToken(pLabel='%s') called", pLabel);
+	/* Strip trailing whitespace and null terminate the label.
+	 * Keep the fixed-length buffer though as some other layers or drivers (SC-HSM)
+	 * might expect the length is fixed! */
+	label = malloc(33);
+	if (label == NULL) {
+		sc_log(context, "Failed to allocate label memory");
+		return CKR_HOST_MEMORY;
+	}
+	memcpy(label, pLabel, 32);
+	label[32] = 0;
+	cpo = label + 31;
+	while ((cpo >= label) && (*cpo == ' ')) {
+		*cpo = 0;
+		cpo--;
+	}
+
+	sc_log(context, "C_InitToken(pLabel='%s') called", label);
 	rv = sc_pkcs11_lock();
-	if (rv != CKR_OK)
+	if (rv != CKR_OK) {
+		free(label);
 		return rv;
+	}
 
 	rv = slot_get_token(slotID, &slot);
 	if (rv != CKR_OK)   {
@@ -726,7 +776,7 @@ CK_RV C_InitToken(CK_SLOT_ID slotID,
 		}
 	}
 
-	rv = slot->p11card->framework->init_token(slot, slot->fw_data, pPin, ulPinLen, pLabel);
+	rv = slot->p11card->framework->init_token(slot, slot->fw_data, pPin, ulPinLen, label);
 	if (rv == CKR_OK) {
 		/* Now we should re-bind all tokens so they get the
 		 * corresponding function vector and flags */
@@ -734,7 +784,8 @@ CK_RV C_InitToken(CK_SLOT_ID slotID,
 
 out:
 	sc_pkcs11_unlock();
-	sc_log(context, "C_InitToken(pLabel='%s') returns 0x%lX", pLabel, rv);
+	sc_log(context, "C_InitToken(pLabel='%s') returns 0x%lX", label, rv);
+	free(label);
 	return rv;
 }
 
@@ -802,7 +853,7 @@ out:
 		sc_wait_for_event(context, 0, NULL, NULL, -1, &reader_states);
 	}
 
-	sc_log(context, "C_WaitForSlotEvent() = %s", lookup_enum (RV_T, rv));
+	SC_LOG_RV("C_WaitForSlotEvent() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -812,10 +863,12 @@ out:
  */
 #define NUM_INTERFACES 2
 #define DEFAULT_INTERFACE 0
+// clang-format off
 CK_INTERFACE interfaces[NUM_INTERFACES] = {
 	{"PKCS 11", (void *)&pkcs11_function_list_3_0, 0},
 	{"PKCS 11", (void *)&pkcs11_function_list, 0}
 };
+// clang-format on
 
 CK_RV C_GetInterfaceList(CK_INTERFACE_PTR pInterfacesList,  /* returned interfaces */
 			 CK_ULONG_PTR pulCount)         /* number of interfaces returned */

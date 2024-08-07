@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -374,7 +374,8 @@ static void print_tags_recursive(const u8 * buf0, const u8 * buf,
 	const u8 *p = buf;
 
 	while (bytesleft >= 2) {
-		unsigned int cla = 0, tag = 0, hlen;
+		unsigned int cla = 0, tag = 0;
+		size_t hlen;
 		const u8 *tagp = p;
 		size_t len;
 
@@ -649,8 +650,7 @@ static int encode_bit_string(const u8 * inbuf, size_t bits_left, u8 **outbuf,
 {
 	const u8 *in = inbuf;
 	u8 *out;
-	size_t bytes;
-	int skipped = 0;
+	size_t bytes, skipped = 0;
 
 	bytes = (bits_left + 7)/8 + 1;
 	*outbuf = out = malloc(bytes);
@@ -659,7 +659,7 @@ static int encode_bit_string(const u8 * inbuf, size_t bits_left, u8 **outbuf,
 	*outlen = bytes;
 	out += 1;
 	while (bits_left) {
-		int i, bits_to_go = 8;
+		size_t i, bits_to_go = 8;
 
 		*out = 0;
 		if (bits_left < 8) {
@@ -978,8 +978,7 @@ static int sc_asn1_decode_utf8string(const u8 *inbuf, size_t inlen,
 int sc_asn1_put_tag(unsigned int tag, const u8 * data, size_t datalen, u8 * out, size_t outlen, u8 **ptr)
 {
 	size_t c = 0;
-	size_t tag_len;
-	size_t ii;
+	unsigned int tag_len, ii;
 	u8 *p = out;
 	u8 tag_char[4] = {0, 0, 0, 0};
 
@@ -1019,7 +1018,7 @@ int sc_asn1_put_tag(unsigned int tag, const u8 * data, size_t datalen, u8 * out,
 	}
 	if (outlen == 0 || out == NULL) {
 		/* Caller only asks for the length that would be written. */
-		return tag_len + (c+1) + datalen;
+		return (int)(tag_len + (c + 1) + datalen);
 	}
 	/* We will write the tag, so check the length. */
 	if (outlen < tag_len + (c+1) + datalen)
@@ -1679,6 +1678,38 @@ static int asn1_decode_entry(sc_context_t *ctx,struct sc_asn1_entry *entry,
 	return 0;
 }
 
+static void sc_free_entry(struct sc_asn1_entry *asn1) {
+	int idx = 0;
+	struct sc_asn1_entry *entry = asn1;
+
+	if (!asn1)
+		return;
+
+	for (idx = 0; asn1[idx].name != NULL; idx++) {
+		entry = &asn1[idx];
+		switch (entry->type) {
+		case SC_ASN1_CHOICE:
+		case SC_ASN1_STRUCT:
+			sc_free_entry((struct sc_asn1_entry *) entry->parm);
+			break;
+		case SC_ASN1_OCTET_STRING:
+		case SC_ASN1_BIT_STRING_NI:
+		case SC_ASN1_BIT_STRING:
+		case SC_ASN1_GENERALIZEDTIME:
+		case SC_ASN1_PRINTABLESTRING:
+		case SC_ASN1_UTF8STRING:
+			if ((entry->flags & SC_ASN1_ALLOC) && (entry->flags & SC_ASN1_PRESENT)) {
+				u8 **buf = (u8 **)entry->parm;
+				free(*buf);
+				*buf = NULL;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+}
+
 static int asn1_decode(sc_context_t *ctx, struct sc_asn1_entry *asn1,
 		       const u8 *in, size_t len, const u8 **newp, size_t *len_left,
 		       int choice, int depth)
@@ -1689,7 +1720,7 @@ static int asn1_decode(sc_context_t *ctx, struct sc_asn1_entry *asn1,
 	size_t left = len, objlen;
 
 	sc_debug(ctx, SC_LOG_DEBUG_ASN1,
-		 "%*.*scalled, left=%"SC_FORMAT_LEN_SIZE_T"u, depth %d%s\n",
+		 "%*.*s""called, left=%"SC_FORMAT_LEN_SIZE_T"u, depth %d%s\n",
 		 depth, depth, "", left, depth, choice ? ", choice" : "");
 
 	if (!p)
@@ -1745,6 +1776,7 @@ static int asn1_decode(sc_context_t *ctx, struct sc_asn1_entry *asn1,
 				}
 				sc_debug(ctx, SC_LOG_DEBUG_ASN1, "next tag: %s\n", line);
 			}
+			sc_free_entry(asn1);
 			SC_FUNC_RETURN(ctx, SC_LOG_DEBUG_ASN1, SC_ERROR_ASN1_OBJECT_NOT_FOUND);
 		}
 		r = asn1_decode_entry(ctx, entry, obj, objlen, depth);
@@ -2061,10 +2093,12 @@ _sc_asn1_decode(sc_context_t *ctx, struct sc_asn1_entry *asn1,
 int
 sc_der_copy(sc_pkcs15_der_t *dst, const sc_pkcs15_der_t *src)
 {
-	if (!dst)
+	if (!dst || !src)
 		return SC_ERROR_INVALID_ARGUMENTS;
 	memset(dst, 0, sizeof(*dst));
 	if (src->len) {
+		if (!src->value)
+			return SC_ERROR_INVALID_ARGUMENTS;
 		dst->value = malloc(src->len);
 		if (!dst->value)
 			return SC_ERROR_OUT_OF_MEMORY;
@@ -2192,3 +2226,53 @@ err:
 
 	LOG_FUNC_RETURN(ctx, rv);
 }
+
+int sc_asn1_decode_ecdsa_signature(sc_context_t *ctx, const u8 *data, size_t datalen, size_t fieldsize, u8 **out, size_t outlen) {
+	int i, r;
+	const unsigned char *pseq, *pint, *pend;
+	unsigned int cla, tag;
+	size_t seqlen, intlen;
+
+	if (!ctx || !data || !out || !(*out)) {
+		LOG_FUNC_RETURN(ctx, SC_ERROR_INVALID_ARGUMENTS);
+	}
+	if (outlen < 2 * fieldsize) {
+		LOG_TEST_RET(ctx, SC_ERROR_INVALID_DATA, "Output too small for EC signature");
+	}
+
+	memset(*out, 0, outlen);
+
+	pseq = data;
+	r = sc_asn1_read_tag(&pseq, datalen, &cla, &tag, &seqlen);
+	if (pseq == NULL || r < 0 || seqlen == 0 || (cla | tag) != 0x30)
+		LOG_TEST_RET(ctx, SC_ERROR_INVALID_DATA, "Can not find 0x30 tag");
+
+	pint = pseq;
+	pend = pseq + seqlen;
+	for (i = 0; i < 2; i++) {
+		r = sc_asn1_read_tag(&pint, (pend - pint), &cla, &tag, &intlen);
+		if (pint == NULL || r < 0 || intlen == 0 || (cla | tag) != 0x02) {
+			r = SC_ERROR_INVALID_DATA;
+			LOG_TEST_GOTO_ERR(ctx, SC_ERROR_INVALID_DATA, "Can not find 0x02");
+		}
+
+		if (intlen == fieldsize + 1) { /* drop leading 00 if present */
+			if (*pint != 0x00) {
+				r = SC_ERROR_INVALID_DATA;
+				LOG_TEST_GOTO_ERR(ctx, SC_ERROR_INVALID_DATA, "Signature too long");
+			}
+			pint++;
+			intlen--;
+		}
+		if (intlen > fieldsize) {
+			r = SC_ERROR_INVALID_DATA;
+			LOG_TEST_GOTO_ERR(ctx, SC_ERROR_INVALID_DATA, "Signature too long");
+		}
+		memcpy(*out + fieldsize * i + fieldsize - intlen , pint, intlen);
+		pint += intlen; /* next integer */
+	}
+	r = (int)(2 * fieldsize);
+err:
+	LOG_FUNC_RETURN(ctx, r);
+}
+

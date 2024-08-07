@@ -1,8 +1,75 @@
-opensc (0.22.0-2) UNRELEASED; urgency=medium
+opensc (0.25.1-1) unstable; urgency=medium
 
-  * update
+  * Team upload
+  * New upstream release
 
- -- Debian OpenSC Maintainers <pkg-opensc-maint@lists.alioth.debian.org>  Thu, 16 Jun 2022 14:00:02 +0800
+ -- Bastian Germann <bage@debian.org>  Wed, 03 Jul 2024 22:26:51 +0200
+
+opensc (0.25.0~rc1-1) unstable; urgency=medium
+
+  * Team upload
+  * New release with fixes for CVE-2024-1454, CVE-2023-5992 (Closes: #1064189)
+
+ -- Bastian Germann <bage@debian.org>  Sun, 18 Feb 2024 13:38:58 +0000
+
+opensc (0.24.0~rc1-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release (Closes: #1055629)
+
+ -- Bastian Germann <bage@debian.org>  Fri, 10 Nov 2023 10:31:33 +0000
+
+opensc (0.23.0-2) unstable; urgency=medium
+
+  * Team upload
+  * Fix CVE-2023-4535 with two upstream patches (Closes: #1055520)
+  * Fix CVE-2023-40660 with upstream patch (Closes: #1055521)
+  * Fix CVE-2023-40661 with upstream patches (Closes: #1055522)
+
+ -- Bastian Germann <bage@debian.org>  Wed, 08 Nov 2023 01:26:46 +0100
+
+opensc (0.23.0-1) unstable; urgency=medium
+
+  * Team upload
+  * Drop -Wno-error=maybe-uninitialized (Closes: #1020526)
+  * Drop old NEWS (lintian: debian-news-entry-has-unknown-version)
+  * opensc-pkcs11: Differentiate short description
+  * Build with OpenPACE for npa-tool support
+  * Include upstream patch 0005 to fix compiler error
+  * Install /etc/eac files for npa-tool
+
+  [ Steve Langasek ]
+  * Build with -Wno-error=stringop-overflow to work around some misbehavior with -O3 (Closes: #1010461)
+
+ -- Bastian Germann <bage@debian.org>  Sun, 27 Aug 2023 23:54:04 +0200
+
+opensc (0.23.0-0.3) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Fix CVE-2023-2977 with upstream patch.
+
+ -- Bastian Germann <bage@debian.org>  Thu, 01 Jun 2023 22:30:18 +0200
+
+opensc (0.23.0-0.2) unstable; urgency=medium
+
+  * Non-maintainer upload
+  * Fix rauc build (Closes: #1030434)
+
+ -- Bastian Germann <bage@debian.org>  Mon, 13 Feb 2023 17:13:20 +0100
+
+opensc (0.23.0-0.1) unstable; urgency=medium
+
+  * Non-maintainer upload
+  * New upstream release (Closes: #1025802)
+
+ -- Bastian Germann <bage@debian.org>  Tue, 10 Jan 2023 18:00:21 +0100
+
+opensc (0.22.0-2.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Import patch to fix usage of pointer after realloc (Closes: #1013011)
+
+ -- Reiner Herrmann <reiner@reiner-h.de>  Sat, 15 Oct 2022 18:26:16 +0200
 
 opensc (0.22.0-2) unstable; urgency=medium
 

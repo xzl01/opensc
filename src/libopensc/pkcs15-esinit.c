@@ -11,7 +11,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 /* Initially written by Weitao Sun (weitao@ftsafe.com) 2008*/
 
@@ -58,16 +58,18 @@ static int sc_pkcs15emu_entersafe_init( sc_pkcs15_card_t *p15card)
 	r = sc_bin_to_hex(serial.value, serial.len, buf, sizeof(buf), 0);
 	if (r != SC_SUCCESS)
 		return SC_ERROR_INTERNAL;
-	free(p15card->tokeninfo->serial_number);
-	p15card->tokeninfo->serial_number = strdup(buf);
+
+	set_string(&p15card->tokeninfo->serial_number, buf);
 	if (!p15card->tokeninfo->serial_number)
 		return SC_ERROR_INTERNAL;
 
 	/* the manufacturer ID, in this case Giesecke & Devrient GmbH */
-	free(p15card->tokeninfo->manufacturer_id);
-	p15card->tokeninfo->manufacturer_id = strdup(MANU_ID);
-	if (!p15card->tokeninfo->manufacturer_id)
+	set_string(&p15card->tokeninfo->manufacturer_id, MANU_ID);
+	if (!p15card->tokeninfo->manufacturer_id) {
+		free(p15card->tokeninfo->serial_number);
+		p15card->tokeninfo->serial_number = NULL;
 		return SC_ERROR_INTERNAL;
+	}
 
 	return SC_SUCCESS;
 }

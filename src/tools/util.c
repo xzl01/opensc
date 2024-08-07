@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -49,7 +49,7 @@ is_string_valid_atr(const char *atr_str)
 }
 
 int util_connect_reader (sc_context_t *ctx, sc_reader_t **reader,
-	const char *reader_id, int do_wait, int verbose)
+	const char *reader_id, int do_wait)
 {
 	struct sc_reader *found = NULL;
 	int r;
@@ -59,17 +59,13 @@ int util_connect_reader (sc_context_t *ctx, sc_reader_t **reader,
 
 	sc_notify_init();
 
-	if (verbose) {
-		ctx->debug = verbose;
-		sc_ctx_log_to_file(ctx, "stderr");
-	}
-
 	if (do_wait) {
-		unsigned int event;
+		unsigned int event = 0;
 
 		if (sc_ctx_get_reader_count(ctx) == 0) {
 			fprintf(stderr, "Waiting for a reader to be attached...\n");
-			r = sc_wait_for_event(ctx, SC_EVENT_READER_ATTACHED, &found, &event, -1, NULL);
+			r = sc_wait_for_event(ctx, SC_EVENT_READER_ATTACHED|SC_EVENT_CARD_INSERTED,
+			                      &found, &event, -1, NULL);
 			if (r < 0) {
 				fprintf(stderr, "Error while waiting for a reader: %s\n", sc_strerror(r));
 				return r;
@@ -80,13 +76,17 @@ int util_connect_reader (sc_context_t *ctx, sc_reader_t **reader,
 				return r;
 			}
 		}
-		fprintf(stderr, "Waiting for a card to be inserted...\n");
-		r = sc_wait_for_event(ctx, SC_EVENT_CARD_INSERTED, &found, &event, -1, NULL);
-		if (r < 0) {
-			fprintf(stderr, "Error while waiting for a card: %s\n", sc_strerror(r));
-			return r;
+		if (event & SC_EVENT_CARD_INSERTED) {
+			*reader = found;
+		} else {
+			fprintf(stderr, "Waiting for a card to be inserted...\n");
+			r = sc_wait_for_event(ctx, SC_EVENT_CARD_INSERTED, &found, &event, -1, NULL);
+			if (r < 0) {
+				fprintf(stderr, "Error while waiting for a card: %s\n", sc_strerror(r));
+				return r;
+			}
+			*reader = found;
 		}
-		*reader = found;
 	}
 	else if (sc_ctx_get_reader_count(ctx) == 0) {
 		fprintf(stderr, "No smart card readers found.\n");
@@ -132,12 +132,12 @@ int util_connect_reader (sc_context_t *ctx, sc_reader_t **reader,
 			}
 			else   {
 				char *endptr = NULL;
-				unsigned int num;
+				long num;
 
 				errno = 0;
 				num = strtol(reader_id, &endptr, 0);
 				if (!errno && endptr && *endptr == '\0')
-					*reader = sc_ctx_get_reader(ctx, num);
+					*reader = sc_ctx_get_reader(ctx, (unsigned)num);
 				else
 					*reader = sc_ctx_get_reader_by_name(ctx, reader_id);
 			}
@@ -158,16 +158,16 @@ autofound:
 }
 int
 util_connect_card_ex(sc_context_t *ctx, sc_card_t **cardp,
-		 const char *reader_id, int do_wait, int do_lock, int verbose)
+		 const char *reader_id, int do_wait, int do_lock)
 {
 	struct sc_reader *reader = NULL;
 	struct sc_card *card = NULL;
 	int r;
 
-	r = util_connect_reader(ctx, &reader, reader_id, do_wait, verbose);
+	r = util_connect_reader(ctx, &reader, reader_id, do_wait);
 	if(r)
 		return r;
-	if (verbose)
+	if (ctx->debug)
 		printf("Connecting to card in reader %s...\n", reader->name);
 	r = sc_connect_card(reader, &card);
 	if (r < 0) {
@@ -175,7 +175,7 @@ util_connect_card_ex(sc_context_t *ctx, sc_card_t **cardp,
 		return r;
 	}
 
-	if (verbose)
+	if (ctx->debug)
 		printf("Using card driver %s.\n", card->driver->name);
 
 	if (do_lock) {
@@ -193,14 +193,14 @@ util_connect_card_ex(sc_context_t *ctx, sc_card_t **cardp,
 
 int
 util_connect_card(sc_context_t *ctx, sc_card_t **cardp,
-		 const char *reader_id, int do_wait, int verbose)
+		 const char *reader_id, int do_wait)
 {
-	return util_connect_card_ex(ctx, cardp, reader_id, do_wait, 1, verbose);
+	return util_connect_card_ex(ctx, cardp, reader_id, do_wait, 1);
 }
 
-void util_print_binary(FILE *f, const u8 *buf, int count)
+void util_print_binary(FILE *f, const u8 *buf, size_t count)
 {
-	int i;
+	size_t i;
 
 	for (i = 0; i < count; i++) {
 		unsigned char c = buf[i];
@@ -214,9 +214,9 @@ void util_print_binary(FILE *f, const u8 *buf, int count)
 	(void) fflush(f);
 }
 
-void util_hex_dump(FILE *f, const u8 *in, int len, const char *sep)
+void util_hex_dump(FILE *f, const u8 *in, size_t len, const char *sep)
 {
-	int i;
+	size_t i;
 
 	for (i = 0; i < len; i++) {
 		if (sep != NULL && i)
@@ -254,8 +254,8 @@ void util_hex_dump_asc(FILE *f, const u8 *in, size_t count, int addr)
 	}
 }
 
-NORETURN void
-util_print_usage_and_die(const char *app_name, const struct option options[],
+void
+util_print_usage(const char *app_name, const struct option options[],
 	const char *option_help[], const char *args)
 {
 	int i;
@@ -301,7 +301,13 @@ util_print_usage_and_die(const char *app_name, const struct option options[],
 		}
 		printf("  %-28s  %s\n", buf, option_help[i]);
 	}
+}
 
+NORETURN void
+util_print_usage_and_die(const char *app_name, const struct option options[],
+	const char *option_help[], const char *args)
+{
+	util_print_usage(app_name, options, option_help, args);
 	exit(2);
 }
 
@@ -486,7 +492,7 @@ util_getpass (char **lineptr, size_t *len, FILE *stream)
 		if (len)
 			*len = MAX_PASS_SIZE;
 	}
-	return i;
+	return (int)i;
 }
 
 size_t

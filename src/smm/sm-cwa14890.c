@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -46,8 +46,8 @@
 #include "sm-module.h"
 
 int
-sm_cwa_get_mac(struct sc_context *ctx, unsigned char *key, DES_cblock *icv,
-			unsigned char *in, int in_len, DES_cblock *out, int force_padding)
+sm_cwa_get_mac(struct sc_context *ctx, unsigned char *key, sm_des_cblock *icv,
+			unsigned char *in, int in_len, sm_des_cblock *out, int force_padding)
 {
 	unsigned char padding[8] = {0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 	unsigned char *buf;
@@ -71,7 +71,7 @@ sm_cwa_get_mac(struct sc_context *ctx, unsigned char *key, DES_cblock *icv,
 	sc_debug(ctx, SC_LOG_DEBUG_SM, "sm_cwa_get_mac() data to MAC(%i) %s", in_len, sc_dump_hex(buf, in_len));
 	sc_debug(ctx, SC_LOG_DEBUG_SM, "sm_cwa_get_mac() ICV %s", sc_dump_hex((unsigned char *)icv, 8));
 
-	DES_cbc_cksum_3des_emv96(buf, out, in_len, key, icv);
+	DES_cbc_cksum_3des_emv96(ctx, buf, out, in_len, key, icv);
 
 	free(buf);
 	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
@@ -122,8 +122,8 @@ int
 sm_cwa_decode_authentication_data(struct sc_context *ctx, struct sm_cwa_keyset *keyset,
 		struct sm_cwa_session *session_data, unsigned char *auth_data)
 {
-	DES_cblock icv = {0, 0, 0, 0, 0, 0, 0, 0};
-	DES_cblock cblock;
+	sm_des_cblock icv = {0, 0, 0, 0, 0, 0, 0, 0};
+	sm_des_cblock cblock;
 	unsigned char *decrypted = NULL;
 	size_t decrypted_len;
 	int rv;
@@ -230,7 +230,7 @@ sm_cwa_initialize(struct sc_context *ctx, struct sm_info *sm_info, struct sc_rem
 	struct sc_apdu *apdu = NULL;
 	unsigned char buf[0x100], *encrypted = NULL;
 	size_t encrypted_len;
-	DES_cblock icv = {0, 0, 0, 0, 0, 0, 0, 0}, cblock;
+	sm_des_cblock icv = {0, 0, 0, 0, 0, 0, 0, 0}, cblock;
 	int rv, offs;
 
 	LOG_FUNC_CALLED(ctx);
@@ -273,7 +273,7 @@ sm_cwa_initialize(struct sc_context *ctx, struct sm_info *sm_info, struct sc_rem
 	       sc_dump_hex(encrypted, encrypted_len));
 
 	memcpy(buf, encrypted, encrypted_len);
-	offs = encrypted_len;
+	offs = (int)encrypted_len;
 
 	rv = sm_cwa_get_mac(ctx, cwa_keyset->mac, &icv, buf, offs, &cblock, 1);
 	LOG_TEST_GOTO_ERR(ctx, rv, "sm_ecc_get_mac() failed");
@@ -304,10 +304,10 @@ sm_cwa_securize_apdu(struct sc_context *ctx, struct sm_info *sm_info, struct sc_
 	struct sm_cwa_session *session_data = &sm_info->session.cwa;
 	struct sc_apdu *apdu = &rapdu->apdu;
 	unsigned char sbuf[0x400];
-	DES_cblock cblock, icv;
+	sm_des_cblock cblock, icv;
 	unsigned char *encrypted = NULL, edfb_data[0x200], mac_data[0x200];
-	size_t encrypted_len, edfb_len = 0, mac_len = 0, offs;
-	int rv;
+	size_t encrypted_len, edfb_len = 0, offs;
+	int rv, mac_len = 0;
 
 	LOG_FUNC_CALLED(ctx);
 	sc_debug(ctx, SC_LOG_DEBUG_SM,
@@ -366,9 +366,9 @@ sm_cwa_securize_apdu(struct sc_context *ctx, struct sm_info *sm_info, struct sc_
 		mac_data[offs++] = apdu->le;
 	/* } */
 
-	mac_len = offs;
-	sc_debug(ctx, SC_LOG_DEBUG_SM, "securize APDU: MAC data(len:%"SC_FORMAT_LEN_SIZE_T"u,%s)",
-	       mac_len, sc_dump_hex(mac_data, mac_len));
+	mac_len = (int)offs;
+	sc_debug(ctx, SC_LOG_DEBUG_SM, "securize APDU: MAC data(len:%d,%s)",
+	       mac_len, sc_dump_hex(mac_data, offs));
 
 	memset(icv, 0, sizeof(icv));
 	rv = sm_cwa_get_mac(ctx, session_data->session_mac, &icv, mac_data, mac_len, &cblock, 0);

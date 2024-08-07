@@ -11,7 +11,7 @@ Index: opensc/src/libopensc/Makefile.am
 --- opensc.orig/src/libopensc/Makefile.am	2020-12-06 02:35:00.085913924 -0500
 +++ opensc/src/libopensc/Makefile.am	2020-12-06 02:35:00.081913968 -0500
 @@ -16,7 +16,7 @@
- 	ccid-types.h reader-tr03119.h \
+ 	card-eoi.h ccid-types.h reader-tr03119.h \
  	card-cac-common.h
  
 -AM_CPPFLAGS = -D'OPENSC_CONF_PATH="$(sysconfdir)/opensc.conf"' \

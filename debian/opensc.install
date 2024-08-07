@@ -9,4 +9,5 @@ debian/tmp/usr/share/doc/opensc/NEWS
 debian/tmp/usr/share/opensc/*.profile
 debian/tmp/usr/share/applications/org.opensc.notify.desktop
 debian/tmp/etc/xdg/autostart/pkcs11-register.desktop
+etc/eac/cvc
 etc/opensc.conf etc/opensc

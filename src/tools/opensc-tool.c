@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -55,6 +55,7 @@ enum {
 	OPT_RESET
 };
 
+// clang-format off
 static const struct option options[] = {
 	{ "version",		0, NULL,	OPT_VERSION },
 	{ "info",		0, NULL,		'i' },
@@ -75,6 +76,7 @@ static const struct option options[] = {
 	{ "verbose",		0, NULL,		'v' },
 	{ NULL, 0, NULL, 0 }
 };
+// clang-format on
 
 static const char *option_help[] = {
 	"Prints OpenSC package revision",
@@ -82,18 +84,18 @@ static const char *option_help[] = {
 	"Prints the ATR bytes of the card",
 	"Prints the card serial number",
 	"Identify the card and print its name",
-	"Get configuration key, format: section:name:key",
-	"Set configuration key, format: section:name:key:value",
+	"Get configuration, e.g. section:name:key",
+	"Set configuration, e.g. section:name:key:val",
 	"Lists readers",
 	"Lists all installed card drivers",
 	"Recursively lists files stored on card",
-	"Sends an APDU in format AA:BB:CC:DD:EE:FF...",
+	"Sends an APDU (may need '-c default')",
 	"Uses reader number <arg> [0]",
 	"Does card reset of type <cold|warm> [cold]",
-	"Forces the use of driver <arg> [auto-detect; '?' for list]",
+	"Forces a card driver (use '?' for list)",
 	"Lists algorithms supported by card",
 	"Wait for a card to be inserted",
-	"Verbose operation. Use several times to enable debug output.",
+	"Verbose operation, may be used several times",
 };
 
 static sc_context_t *ctx = NULL;
@@ -422,13 +424,13 @@ static int print_file(sc_card_t *in_card, const sc_file_t *file,
 		free(buf);
 	} else {
 		unsigned char buf[256];
-		size_t rec_nr;
+		unsigned int rec_nr;
 
 		for (rec_nr = 1; rec_nr <= file->record_count; rec_nr++) {
-			printf("Record %"SC_FORMAT_LEN_SIZE_T"u\n", rec_nr);
+			printf("Record %u\n", rec_nr);
 			r = sc_lock(card);
 			if (r == SC_SUCCESS)
-				r = sc_read_record(in_card, rec_nr, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
+				r = sc_read_record(in_card, rec_nr, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
 			sc_unlock(card);
 			if (r > 0)
 				util_hex_dump_asc(stdout, buf, r, 0);
@@ -498,15 +500,15 @@ static int send_apdu(void)
 	u8 buf[SC_MAX_EXT_APDU_BUFFER_SIZE],
 	  rbuf[SC_MAX_EXT_APDU_BUFFER_SIZE];
 	size_t len0, r;
-	int c;
+	int c, rc;
 
 	for (c = 0; c < opt_apdu_count; c++) {
 		len0 = sizeof(buf);
 		sc_hex_to_bin(opt_apdus[c], buf, &len0);
 
-		r = sc_bytes2apdu(card->ctx, buf, len0, &apdu);
-		if (r) {
-			fprintf(stderr, "Invalid APDU: %s\n", sc_strerror(r));
+		rc = sc_bytes2apdu(card->ctx, buf, len0, &apdu);
+		if (rc) {
+			fprintf(stderr, "Invalid APDU: %s\n", sc_strerror(rc));
 			return 2;
 		}
 
@@ -517,12 +519,12 @@ static int send_apdu(void)
 		for (r = 0; r < len0; r++)
 			printf("%02X ", buf[r]);
 		printf("\n");
-		r = sc_lock(card);
-		if (r == SC_SUCCESS)
-			r = sc_transmit_apdu(card, &apdu);
+		rc = sc_lock(card);
+		if (rc == SC_SUCCESS)
+			rc = sc_transmit_apdu(card, &apdu);
 		sc_unlock(card);
-		if (r) {
-			fprintf(stderr, "APDU transmit failed: %s\n", sc_strerror(r));
+		if (rc) {
+			fprintf(stderr, "APDU transmit failed: %s\n", sc_strerror(rc));
 			return 1;
 		}
 		printf("Received (SW1=0x%02X, SW2=0x%02X)%s\n", apdu.sw1, apdu.sw2,
@@ -553,9 +555,9 @@ static int list_algorithms(void)
 	int i;
 	const char *aname = "unknown";
 
+	// clang-format off
 	const id2str_t alg_type_names[] = {
 		{ SC_ALGORITHM_RSA,       "rsa"       },
-		{ SC_ALGORITHM_DSA,       "dsa"       },
 		{ SC_ALGORITHM_EC,        "ec"        },
 		{ SC_ALGORITHM_EDDSA,     "eddsa"     },
 		{ SC_ALGORITHM_GOSTR3410, "gostr3410" },
@@ -576,21 +578,24 @@ static int list_algorithms(void)
 		{ 0, NULL }
 	};
 	const id2str_t rsa_flag_names[] = {
-		{ SC_ALGORITHM_RSA_PAD_PKCS1,      "pkcs1"     },
-		{ SC_ALGORITHM_RSA_PAD_ANSI,       "ansi"      },
-		{ SC_ALGORITHM_RSA_PAD_PSS,        "pss"       },
-		{ SC_ALGORITHM_RSA_PAD_OAEP,       "oaep"      },
-		{ SC_ALGORITHM_RSA_PAD_ISO9796,    "iso9796"   },
-		{ SC_ALGORITHM_RSA_HASH_SHA1,      "sha1"      },
-		{ SC_ALGORITHM_RSA_HASH_MD5,       "MD5"       },
-		{ SC_ALGORITHM_RSA_HASH_MD5_SHA1,  "md5-sha1"  },
-		{ SC_ALGORITHM_RSA_HASH_RIPEMD160, "ripemd160" },
-		{ SC_ALGORITHM_RSA_HASH_SHA256,    "sha256"    },
-		{ SC_ALGORITHM_RSA_HASH_SHA384,    "sha384"    },
-		{ SC_ALGORITHM_RSA_HASH_SHA512,    "sha512"    },
-		{ SC_ALGORITHM_RSA_HASH_SHA224,    "sha224"    },
+		{ SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01, "pkcs1-type1" },
+		{ SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_02, "pkcs1-type2" },
+		{ SC_ALGORITHM_RSA_PAD_PKCS1,         "pkcs1"       },
+		{ SC_ALGORITHM_RSA_PAD_ANSI,          "ansi"        },
+		{ SC_ALGORITHM_RSA_PAD_PSS,           "pss"         },
+		{ SC_ALGORITHM_RSA_PAD_OAEP,          "oaep"        },
+		{ SC_ALGORITHM_RSA_PAD_ISO9796,       "iso9796"     },
+		{ SC_ALGORITHM_RSA_HASH_SHA1,         "sha1"        },
+		{ SC_ALGORITHM_RSA_HASH_MD5,          "MD5"         },
+		{ SC_ALGORITHM_RSA_HASH_MD5_SHA1,     "md5-sha1"    },
+		{ SC_ALGORITHM_RSA_HASH_RIPEMD160,    "ripemd160"   },
+		{ SC_ALGORITHM_RSA_HASH_SHA256,       "sha256"      },
+		{ SC_ALGORITHM_RSA_HASH_SHA384,       "sha384"      },
+		{ SC_ALGORITHM_RSA_HASH_SHA512,       "sha512"      },
+		{ SC_ALGORITHM_RSA_HASH_SHA224,       "sha224"      },
 		{ 0, NULL }
 	};
+	// clang-format on
 
 	if (verbose)
 		printf("Card supports %d algorithm(s)\n\n",card->algorithm_count);
@@ -607,7 +612,7 @@ static int list_algorithms(void)
 		}
 
 		printf("Algorithm: %s\n", aname);
-		printf("Key length: %d\n", card->algorithms[i].key_length);
+		printf("Key length: %zu\n", card->algorithms[i].key_length);
 		printf("Flags:");
 
 		/* print general flags */
@@ -812,6 +817,9 @@ int main(int argc, char *argv[])
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -844,7 +852,7 @@ int main(int argc, char *argv[])
 	if (action_count <= 0)
 		goto end;
 
-	err = util_connect_reader(ctx, &reader, opt_reader, opt_wait, verbose);
+	err = util_connect_reader(ctx, &reader, opt_reader, opt_wait);
 	if (err) {
 		fprintf(stderr, "Failed to connect to reader: %s\n", sc_strerror(err));
 		err = 1;

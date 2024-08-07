@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -68,7 +68,6 @@ void sc_notify_close(void)
 
 #include "common/compat_strlcpy.h"
 #include "invisible_window.h"
-#include "wchar_from_char_str.h"
 #include <shellapi.h>
 #include <shlwapi.h>
 
@@ -84,6 +83,26 @@ void ShowContextMenu(HWND hwnd, POINT pt);
 
 // we need commctrl v6 for LoadIconMetric()
 #include <commctrl.h>
+
+static int GetMonitorScalingRatio(void)
+{
+	POINT pt = { 0, 0 };
+	HMONITOR monitor;
+	MONITORINFOEX info = { .cbSize = sizeof(MONITORINFOEX) };
+	DEVMODE devmode = { .dmSize = sizeof(DEVMODE) };
+	monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+	if (!monitor)
+		goto err;
+	if (!GetMonitorInfo(monitor, (LPMONITORINFO)&info))
+		goto err;
+	if (!EnumDisplaySettings(info.szDevice, ENUM_CURRENT_SETTINGS, &devmode))
+		goto err;
+	if (info.rcMonitor.left == info.rcMonitor.right)
+		goto err;
+	return 100*devmode.dmPelsWidth/(info.rcMonitor.right - info.rcMonitor.left);
+err:
+	return 100;
+}
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -112,7 +131,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 				case WM_CONTEXTMENU:
 					{
-						POINT const pt = { LOWORD(wParam), HIWORD(wParam) };
+						int scaling = GetMonitorScalingRatio();
+						POINT const pt = { 100*LOWORD(wParam)/scaling, 100*HIWORD(wParam)/scaling };
 						ShowContextMenu(hwnd, pt);
 					}
 					break;

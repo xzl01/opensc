@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -87,7 +87,7 @@ static const char *option_help[] = {
 	"Define the new administrator key",
 	"Uses reader number <arg> [0]",
 	"Wait for a card to be inserted",
-	"Verbose operation. Use several times to enable debug output.",
+	"Verbose operation, may be used several times",
 };
 
 static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin, const char* serial)
@@ -357,7 +357,7 @@ static int print_info(sc_card_t *card) {
 	gids_mf_record_t *records = (gids_mf_record_t *) (masterfile+1);
 	int recordcount;
 	int i;
-	
+
 	printf("===============================\n");
 	printf("Dumping the content of the card\n");
 	printf("===============================\n");
@@ -402,46 +402,46 @@ static int print_info(sc_card_t *card) {
 			printf("Unable to find the container file (mscp\\cmapfile)\n");
 		} else {
 			PCONTAINER_MAP_RECORD cmaprecords = (PCONTAINER_MAP_RECORD) cmapfile;
-			int cmaprecordnum = (cmapfilesize / sizeof(CONTAINER_MAP_RECORD));
-			int keymaprecordnum = -1;
+			size_t cmaprecordnum = (cmapfilesize / sizeof(CONTAINER_MAP_RECORD));
+			size_t keymaprecordnum = -1;
 			struct gids_keymap_record* keymaprecord = ((struct gids_keymap_record*)(keymap +1));
 			if (cmaprecordnum == 0) {
 				printf("   no container found\n");
 			} else {
+				size_t j;
 				r = gids_get_DO(card, KEYMAP_FI, KEYMAP_DO, keymap, &keymapsize);
 				if (r < 0) {
 					printf("   the keymap couldn't be found\n");
 				} else {
 					keymaprecordnum = (keymapsize - 1) / sizeof(struct gids_keymap_record);
 				}
-				for (i = 0; i < cmaprecordnum; i++) {
+				for (j = 0; j < cmaprecordnum; j++) {
 #ifdef _WIN32
-					wprintf(L"      guid:                    %ls\n", cmaprecords[i].wszGuid);
+					wprintf(L"      guid:                    %ls\n", cmaprecords[j].wszGuid);
 #else
 					/* avoid converting Windows' WCHAR to Unix' wchar_t by simply dumping the content */
-					util_hex_dump(stdout,
-							(unsigned char *) cmaprecords[i].wszGuid,
-							sizeof cmaprecords[i].wszGuid, "");
+					util_hex_dump(stdout, (unsigned char *)cmaprecords[j].wszGuid,
+							sizeof cmaprecords[j].wszGuid, "");
 #endif
 					printf("      bFlags:                  ");
-					if (cmaprecords[i].bFlags & CONTAINER_MAP_VALID_CONTAINER) {
+					if (cmaprecords[j].bFlags & CONTAINER_MAP_VALID_CONTAINER) {
 						printf("Valid container");
-						if (cmaprecords[i].bFlags & CONTAINER_MAP_DEFAULT_CONTAINER) {
+						if (cmaprecords[j].bFlags & CONTAINER_MAP_DEFAULT_CONTAINER) {
 							printf(",Default container");
 						}
 					} else {
 						printf("Empty container");
 					}
 					printf("\n");
-					printf("      wSigKeySizeBits:         %d\n", cmaprecords[i].wSigKeySizeBits);
-					printf("      wKeyExchangeKeySizeBits: %d\n", cmaprecords[i].wKeyExchangeKeySizeBits);
-					if (i < keymaprecordnum) {
+					printf("      wSigKeySizeBits:         %d\n", cmaprecords[j].wSigKeySizeBits);
+					printf("      wKeyExchangeKeySizeBits: %d\n", cmaprecords[j].wKeyExchangeKeySizeBits);
+					if (j < keymaprecordnum) {
 						printf("      key info:\n");
-						printf("         state:                %d\n", keymaprecord[i].state);
-						printf("         algid:                %d\n", keymaprecord[i].algid);
-						printf("         keyref:               0x%x\n", keymaprecord[i].keyref);
+						printf("         state:                %d\n", keymaprecord[j].state);
+						printf("         algid:                %d\n", keymaprecord[j].algid);
+						printf("         keyref:               0x%x\n", keymaprecord[j].keyref);
 						printf("         key type:             ");
-						switch(keymaprecord[i].keytype) {
+						switch(keymaprecord[j].keytype) {
 						case 0:
 							printf("none\n");
 							break;
@@ -525,26 +525,13 @@ int main(int argc, char * argv[])
 		}
 	}
 
-
 	/* OpenSSL magic */
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-	OPENSSL_config(NULL);
-#endif
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
-	OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
-		| OPENSSL_INIT_ADD_ALL_CIPHERS
-		| OPENSSL_INIT_ADD_ALL_DIGESTS,
-               NULL);
-#else
-	/* OpenSSL magic */
-	OPENSSL_malloc_init();
-
-	ERR_load_crypto_strings();
-	OpenSSL_add_all_algorithms();
-#endif
 
 	memset(&ctx_param, 0, sizeof(sc_context_param_t));
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r != SC_SUCCESS) {
@@ -552,7 +539,7 @@ int main(int argc, char * argv[])
 		exit(1);
 	}
 
-	r = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);
+	r = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (r != SC_SUCCESS) {
 		if (r < 0) {
 			fprintf(stderr, "Failed to connect to card: %s\n", sc_strerror(err));

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -249,10 +249,10 @@ static int format_senv(struct sc_pkcs15_card *p15card,
 			senv_out->algorithm_ref = prkey->field_length;
 			break;
 		case SC_PKCS15_TYPE_SKEY_GENERIC:
-			if (obj->type == SC_PKCS15_TYPE_SKEY_GENERIC && skey->key_type != CKK_AES)
+			if (skey->key_type != CKK_AES)
 				LOG_TEST_RET(ctx, SC_ERROR_NOT_SUPPORTED, "Key type not supported");
 			*alg_info_out = sc_card_find_alg(p15card->card, SC_ALGORITHM_AES,
-			skey->value_len, NULL);
+					skey->value_len, NULL);
 			if (*alg_info_out == NULL) {
 				sc_log(ctx,
 				"Card does not support AES with key length %"SC_FORMAT_LEN_SIZE_T"u",
@@ -280,7 +280,7 @@ static int format_senv(struct sc_pkcs15_card *p15card,
 int sc_pkcs15_decipher(struct sc_pkcs15_card *p15card,
 		const struct sc_pkcs15_object *obj,
 		unsigned long flags,
-		const u8 * in, size_t inlen, u8 *out, size_t outlen)
+		const u8 * in, size_t inlen, u8 *out, size_t outlen, void *pMechanism)
 {
 	sc_context_t *ctx = p15card->card->ctx;
 	int r;
@@ -307,13 +307,34 @@ int sc_pkcs15_decipher(struct sc_pkcs15_card *p15card,
 	LOG_TEST_RET(ctx, r, "use_key() failed");
 
 	/* Strip any padding */
-	if (pad_flags & SC_ALGORITHM_RSA_PAD_PKCS1) {
-		size_t s = r;
-		r = sc_pkcs1_strip_02_padding(ctx, out, s, out, &s);
-		LOG_TEST_RET(ctx, r, "Invalid PKCS#1 padding");
+	if (pad_flags & SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_02) {
+		unsigned int s = r;
+		unsigned int key_size = (unsigned int)alg_info->key_length;
+		r = sc_pkcs1_strip_02_padding_constant_time(ctx, key_size / 8, out, s, out, &s);
+		/* for keeping PKCS#1 v1.5 depadding constant-time, do not log error here */
 	}
-
-	LOG_FUNC_RETURN(ctx, r);
+#ifdef ENABLE_OPENSSL
+	if (pad_flags & SC_ALGORITHM_RSA_PAD_OAEP)
+	{
+		size_t s = r;
+		uint8_t *param = NULL;
+		size_t paramlen = 0;
+		if (pMechanism != NULL) {
+			CK_MECHANISM *mech = (CK_MECHANISM *)pMechanism;
+			if (mech->pParameter && sizeof(CK_RSA_PKCS_OAEP_PARAMS) == mech->ulParameterLen) {
+				CK_RSA_PKCS_OAEP_PARAMS * oaep_params = mech->pParameter;
+				if (oaep_params->source == CKZ_DATA_SPECIFIED) {
+					param = oaep_params->pSourceData;
+					paramlen = (size_t)oaep_params->ulSourceDataLen;
+				}
+			}
+		}
+		r = sc_pkcs1_strip_oaep_padding(ctx, out, s, flags, param, paramlen);
+		LOG_TEST_RET(ctx, r, "Invalid OAEP padding");
+	}
+#endif
+	/* do not log error code to prevent side channel attack */
+	return r;
 }
 
 /* derive one key from another. RSA can use decipher, so this is for only ECDH
@@ -574,15 +595,15 @@ int sc_pkcs15_wrap(struct sc_pkcs15_card *p15card,
 int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 				const struct sc_pkcs15_object *obj,
 				unsigned long flags, const u8 *in, size_t inlen,
-				u8 *out, size_t outlen)
+				u8 *out, size_t outlen, void *pMechanism)
 {
 	sc_context_t *ctx = p15card->card->ctx;
 	int r;
 	sc_security_env_t senv;
 	sc_algorithm_info_t *alg_info;
 	const struct sc_pkcs15_prkey_info *prkey = (const struct sc_pkcs15_prkey_info *) obj->data;
-	u8 buf[1024], *tmp;
-	size_t modlen;
+	u8 *buf = NULL, *tmp;
+	size_t modlen = 0, buflen = 0;
 	unsigned long pad_flags = 0, sec_flags = 0;
 
 	LOG_FUNC_CALLED(ctx);
@@ -612,9 +633,13 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 	}
 
 	/* Probably never happens, but better make sure */
-	if (inlen > sizeof(buf) || outlen < modlen)
+	if (outlen < modlen)
 		LOG_FUNC_RETURN(ctx, SC_ERROR_BUFFER_TOO_SMALL);
 
+	buflen = inlen + modlen;
+	buf = sc_mem_secure_alloc(buflen);
+	if (buf == NULL)
+		LOG_FUNC_RETURN(ctx, SC_ERROR_OUT_OF_MEMORY);
 	memcpy(buf, in, inlen);
 
 	/* revert data to sign when signing with the GOST key.
@@ -622,7 +647,7 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 	 * TODO: tested with RuTokenECP, has to be validated for RuToken. */
 	if (obj->type == SC_PKCS15_TYPE_PRKEY_GOSTR3410) {
 		r = sc_mem_reverse(buf, inlen);
-		LOG_TEST_RET(ctx, r, "Reverse memory error");
+		LOG_TEST_GOTO_ERR(ctx, r, "Reverse memory error");
 	}
 
 	tmp = buf;
@@ -634,31 +659,31 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 	/* if the card has SC_ALGORITHM_NEED_USAGE set, and the
 	 * key is for signing and decryption, we need to emulate signing */
 
-	sc_log(ctx, "supported algorithm flags 0x%X, private key usage 0x%X", alg_info->flags, prkey->usage);
+	sc_log(ctx, "supported algorithm flags 0x%lX, private key usage 0x%X", alg_info->flags, prkey->usage);
 	if (obj->type == SC_PKCS15_TYPE_PRKEY_RSA) {
 		if ((alg_info->flags & SC_ALGORITHM_NEED_USAGE) &&
 			((prkey->usage & USAGE_ANY_SIGN) &&
 			(prkey->usage & USAGE_ANY_DECIPHER)) ) {
-			size_t tmplen = sizeof(buf);
+			size_t tmplen = buflen;
 			if (flags & SC_ALGORITHM_RSA_RAW) {
-				r = sc_pkcs15_decipher(p15card, obj, flags, in, inlen, out, outlen);
-				LOG_FUNC_RETURN(ctx, r);
+				r = sc_pkcs15_decipher(p15card, obj, flags, in, inlen, out, outlen, NULL);
+				goto err;
 			}
 			if (modlen > tmplen)
-				LOG_TEST_RET(ctx, SC_ERROR_NOT_ALLOWED, "Buffer too small, needs recompile!");
+				LOG_TEST_GOTO_ERR(ctx, SC_ERROR_NOT_ALLOWED, "Buffer too small, needs recompile!");
 
 			/* XXX Assuming RSA key here */
-			r = sc_pkcs1_encode(ctx, flags, in, inlen, buf, &tmplen, prkey->modulus_length);
+			r = sc_pkcs1_encode(ctx, flags, in, inlen, buf, &tmplen, prkey->modulus_length, pMechanism);
 
 			/* no padding needed - already done */
 			flags &= ~SC_ALGORITHM_RSA_PADS;
 			/* instead use raw rsa */
 			flags |= SC_ALGORITHM_RSA_RAW;
 
-			LOG_TEST_RET(ctx, r, "Unable to add padding");
+			LOG_TEST_GOTO_ERR(ctx, r, "Unable to add padding");
 
-			r = sc_pkcs15_decipher(p15card, obj, flags, buf, modlen, out, outlen);
-			LOG_FUNC_RETURN(ctx, r);
+			r = sc_pkcs15_decipher(p15card, obj, flags, buf, modlen, out, outlen, NULL);
+			goto err;
 		}
 
 
@@ -668,17 +693,17 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 		 * succeed by stripping padding if the card only offers higher-level
 		 * signature operations.  The only thing we can strip is the DigestInfo
 		 * block from PKCS1 padding. */
-		if ((flags == (SC_ALGORITHM_RSA_PAD_PKCS1 | SC_ALGORITHM_RSA_HASH_NONE)) &&
-		    !(alg_info->flags & SC_ALGORITHM_RSA_RAW) &&
-		    !(alg_info->flags & SC_ALGORITHM_RSA_HASH_NONE) &&
-		    (alg_info->flags & SC_ALGORITHM_RSA_PAD_PKCS1)) {
+		if ((flags == (SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01 | SC_ALGORITHM_RSA_HASH_NONE)) &&
+			!(alg_info->flags & SC_ALGORITHM_RSA_RAW) &&
+			!(alg_info->flags & SC_ALGORITHM_RSA_HASH_NONE) &&
+			(alg_info->flags & SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01)) {
 			unsigned int algo;
-			size_t tmplen = sizeof(buf);
+			size_t tmplen = buflen;
 
 			r = sc_pkcs1_strip_digest_info_prefix(&algo, tmp, inlen, tmp, &tmplen);
 			if (r != SC_SUCCESS || algo == SC_ALGORITHM_RSA_HASH_NONE) {
-				sc_mem_clear(buf, sizeof(buf));
-				LOG_FUNC_RETURN(ctx, SC_ERROR_INVALID_DATA);
+				r = SC_ERROR_INVALID_DATA;
+				goto err;
 			}
 			flags &= ~SC_ALGORITHM_RSA_HASH_NONE;
 			flags |= algo;
@@ -687,7 +712,7 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 	}
 
 
-	/* ECDSA sofware hash has already been done, or is not needed, or card will do hash */
+	/* ECDSA software hash has already been done, or is not needed, or card will do hash */
 	/* if card can not do the hash, will use SC_ALGORITHM_ECDSA_RAW */
 	if (obj->type == SC_PKCS15_TYPE_PRKEY_EC) {
 		if ((alg_info->flags & SC_ALGORITHM_ECDSA_RAW)
@@ -700,31 +725,32 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 
 	r = sc_get_encoding_flags(ctx, flags, alg_info->flags, &pad_flags, &sec_flags);
 	if (r != SC_SUCCESS) {
-		sc_mem_clear(buf, sizeof(buf));
-		LOG_FUNC_RETURN(ctx, r);
+		goto err;
 	}
 	/* senv now has flags card or driver will do */
 	senv.algorithm_flags = sec_flags;
 
-	sc_log(ctx, "DEE flags:0x%8.8lx alg_info->flags:0x%8.8x pad:0x%8.8lx sec:0x%8.8lx",
+	sc_log(ctx, "DEE flags:0x%8.8lx alg_info->flags:0x%8.8lx pad:0x%8.8lx sec:0x%8.8lx",
 		flags, alg_info->flags, pad_flags, sec_flags);
 
 	/* add the padding bytes (if necessary) */
 	if (pad_flags != 0) {
-		size_t tmplen = sizeof(buf);
+		size_t tmplen = buflen;
 
 		/* XXX Assuming RSA key here */
 		r = sc_pkcs1_encode(ctx, pad_flags, tmp, inlen, tmp, &tmplen,
-		    prkey->modulus_length);
-		LOG_TEST_RET(ctx, r, "Unable to add padding");
+		    prkey->modulus_length, pMechanism);
+		LOG_TEST_GOTO_ERR(ctx, r, "Unable to add padding");
 		inlen = tmplen;
 	}
 	else if ( senv.algorithm == SC_ALGORITHM_RSA &&
 	          (flags & SC_ALGORITHM_RSA_PADS) == SC_ALGORITHM_RSA_PAD_NONE) {
 		/* Add zero-padding if input is shorter than the modulus */
 		if (inlen < modlen) {
-			if (modlen > sizeof(buf))
-				return SC_ERROR_BUFFER_TOO_SMALL;
+			if (modlen > buflen) {
+				r = SC_ERROR_BUFFER_TOO_SMALL;
+				goto err;
+			}
 			memmove(tmp+modlen-inlen, tmp, inlen);
 			memset(tmp, 0, modlen-inlen);
 		}
@@ -744,17 +770,192 @@ int sc_pkcs15_compute_signature(struct sc_pkcs15_card *p15card,
 
 	r = use_key(p15card, obj, &senv, sc_compute_signature, tmp, inlen,
 			out, outlen);
-	LOG_TEST_RET(ctx, r, "use_key() failed");
+	LOG_TEST_GOTO_ERR(ctx, r, "use_key() failed");
 
 	/* Some cards may return RSA signature as integer without leading zero bytes */
 	/* Already know outlen >= modlen and r >= 0 */
 	if (obj->type == SC_PKCS15_TYPE_PRKEY_RSA && (unsigned)r < modlen) {
 		memmove(out + modlen - r, out, r);
 		memset(out, 0, modlen - r);
-		r = modlen;
+		r = (int)modlen;
 	}
 
-	sc_mem_clear(buf, sizeof(buf));
+err:
+	sc_mem_secure_clear_free(buf, buflen);
+
+	LOG_FUNC_RETURN(ctx, r);
+}
+
+int
+sc_pkcs15_encrypt_sym(struct sc_pkcs15_card *p15card,
+		const struct sc_pkcs15_object *obj,
+		unsigned long flags,
+		const u8 *in, size_t inlen, u8 *out, size_t *outlen,
+		const u8 *param, size_t paramlen)
+{
+
+	sc_context_t *ctx = p15card->card->ctx;
+
+	int i, r;
+	sc_algorithm_info_t *alg_info = NULL;
+	sc_security_env_t senv;
+	sc_sec_env_param_t senv_param;
+	const struct sc_pkcs15_skey_info *skey;
+	unsigned long pad_flags = 0, sec_flags = 0;
+	int revalidated_cached_pin = 0;
+	sc_path_t path;
+
+	sc_log(ctx, "called with flags 0x%lX", flags);
+
+	skey = (const struct sc_pkcs15_skey_info *)obj->data;
+	if (!(skey->usage & SC_PKCS15_PRKEY_USAGE_ENCRYPT))
+		LOG_TEST_RET(ctx, SC_ERROR_NOT_ALLOWED, "This key cannot be used for encryption");
+
+	r = format_senv(p15card, obj, &senv, &alg_info);
+	LOG_TEST_RET(ctx, r, "Could not initialize security environment");
+	senv.operation = SC_SEC_OPERATION_ENCRYPT_SYM;
+
+	r = sc_get_encoding_flags(ctx, flags, alg_info->flags, &pad_flags, &sec_flags);
+	LOG_TEST_RET(ctx, r, "cannot encode security operation flags");
+	senv.algorithm_flags = sec_flags;
+
+	for (i = 0; i < SC_MAX_SUPPORTED_ALGORITHMS && senv.supported_algos[i].reference; i++) {
+		if ((senv.supported_algos[i].mechanism == CKM_AES_ECB && sec_flags == SC_ALGORITHM_AES_ECB) ||
+				(senv.supported_algos[i].mechanism == CKM_AES_CBC && sec_flags == SC_ALGORITHM_AES_CBC) ||
+				(senv.supported_algos[i].mechanism == CKM_AES_CBC_PAD && sec_flags == SC_ALGORITHM_AES_CBC_PAD)) {
+			senv.algorithm_ref = senv.supported_algos[i].algo_ref;
+			senv.flags |= SC_SEC_ENV_ALG_REF_PRESENT;
+			break;
+		}
+	}
+
+	if ((sec_flags & (SC_ALGORITHM_AES_CBC | SC_ALGORITHM_AES_CBC_PAD)) > 0) {
+		senv_param = (sc_sec_env_param_t){
+				SC_SEC_ENV_PARAM_IV, (void *)param, paramlen};
+		LOG_TEST_RET(ctx, sec_env_add_param(&senv, &senv_param), "failed to add IV to security environment");
+	}
+
+	LOG_TEST_RET(p15card->card->ctx, get_file_path(obj, &path), "Failed to get key file path.");
+
+	LOG_TEST_RET(p15card->card->ctx, r, "sc_lock() failed");
+
+	do {
+		r = SC_SUCCESS;
+		if (outlen == NULL) {
+			/* C_EncryptInit */
+			/* select key file and set sec env */
+			if (path.len != 0 || path.aid.len != 0) {
+				r = select_key_file(p15card, obj, &senv);
+				if (r < 0)
+					sc_log(p15card->card->ctx, "Unable to select key file");
+			}
+			if (r == SC_SUCCESS) {
+				r = sc_set_security_env(p15card->card, &senv, 0);
+				if (r < 0)
+					sc_log(p15card->card->ctx, "Unable to set security env");
+			}
+		}
+
+		if (r == SC_SUCCESS)
+			r = sc_encrypt_sym(p15card->card, in, inlen, out, outlen);
+
+		if (revalidated_cached_pin)
+			/* only re-validate once */
+			break;
+		if (r == SC_ERROR_SECURITY_STATUS_NOT_SATISFIED) {
+			r = sc_pkcs15_pincache_revalidate(p15card, obj);
+			if (r < 0)
+				break;
+			revalidated_cached_pin = 1;
+		}
+	} while (revalidated_cached_pin);
+
+	LOG_FUNC_RETURN(ctx, r);
+}
+
+int
+sc_pkcs15_decrypt_sym(struct sc_pkcs15_card *p15card,
+		const struct sc_pkcs15_object *obj,
+		unsigned long flags,
+		const u8 *in, size_t inlen, u8 *out, size_t *outlen,
+		const u8 *param, size_t paramlen)
+{
+
+	sc_context_t *ctx = p15card->card->ctx;
+
+	int i, r;
+	sc_algorithm_info_t *alg_info = NULL;
+	sc_security_env_t senv;
+	sc_sec_env_param_t senv_param;
+	const struct sc_pkcs15_skey_info *skey;
+	unsigned long pad_flags = 0, sec_flags = 0;
+	int revalidated_cached_pin = 0;
+	sc_path_t path;
+
+	sc_log(ctx, "called with flags 0x%lX", flags);
+
+	skey = (const struct sc_pkcs15_skey_info *)obj->data;
+	if (!(skey->usage & SC_PKCS15_PRKEY_USAGE_DECRYPT))
+		LOG_TEST_RET(ctx, SC_ERROR_NOT_ALLOWED, "This key cannot be used for encryption");
+
+	r = format_senv(p15card, obj, &senv, &alg_info);
+	LOG_TEST_RET(ctx, r, "Could not initialize security environment");
+	senv.operation = SC_SEC_OPERATION_DECRYPT_SYM;
+
+	r = sc_get_encoding_flags(ctx, flags, alg_info->flags, &pad_flags, &sec_flags);
+	LOG_TEST_RET(ctx, r, "cannot encode security operation flags");
+	senv.algorithm_flags = sec_flags;
+
+	for (i = 0; i < SC_MAX_SUPPORTED_ALGORITHMS && senv.supported_algos[i].reference; i++) {
+		if ((senv.supported_algos[i].mechanism == CKM_AES_ECB && sec_flags == SC_ALGORITHM_AES_ECB) ||
+				(senv.supported_algos[i].mechanism == CKM_AES_CBC && sec_flags == SC_ALGORITHM_AES_CBC) ||
+				(senv.supported_algos[i].mechanism == CKM_AES_CBC_PAD && sec_flags == SC_ALGORITHM_AES_CBC_PAD)) {
+			senv.algorithm_ref = senv.supported_algos[i].algo_ref;
+			senv.flags |= SC_SEC_ENV_ALG_REF_PRESENT;
+			break;
+		}
+	}
+
+	if ((sec_flags & (SC_ALGORITHM_AES_CBC | SC_ALGORITHM_AES_CBC_PAD)) > 0) {
+		senv_param = (sc_sec_env_param_t){
+				SC_SEC_ENV_PARAM_IV, (void *)param, paramlen};
+		LOG_TEST_RET(ctx, sec_env_add_param(&senv, &senv_param), "failed to add IV to security environment");
+	}
+
+	LOG_TEST_RET(p15card->card->ctx, get_file_path(obj, &path), "Failed to get key file path.");
+
+	LOG_TEST_RET(p15card->card->ctx, r, "sc_lock() failed");
+
+	do {
+		r = SC_SUCCESS;
+		if (outlen == NULL) {
+			/* C_DecryptInit */
+			/* select key file and set sec env */
+			if (path.len != 0 || path.aid.len != 0) {
+				r = select_key_file(p15card, obj, &senv);
+				if (r < 0)
+					sc_log(p15card->card->ctx, "Unable to select key file");
+			}
+			if (r == SC_SUCCESS) {
+				r = sc_set_security_env(p15card->card, &senv, 0);
+				if (r < 0)
+					sc_log(p15card->card->ctx, "Unable to set security env");
+			}
+		}
+
+		if (r == SC_SUCCESS)
+			r = sc_decrypt_sym(p15card->card, in, inlen, out, outlen);
+
+		if (revalidated_cached_pin)
+			/* only re-validate once */
+			break;
+		if (r == SC_ERROR_SECURITY_STATUS_NOT_SATISFIED) {
+			r = sc_pkcs15_pincache_revalidate(p15card, obj);
+			if (r < 0)
+				break;
+			revalidated_cached_pin = 1;
+		}
+	} while (revalidated_cached_pin);
 
 	LOG_FUNC_RETURN(ctx, r);
 }

@@ -1,5 +1,5 @@
 /*
- * muscle-filesystem.c: Support for MuscleCard Applet from musclecard.com 
+ * muscle-filesystem.c: Support for MuscleCard Applet from musclecard.com
  *
  * Copyright (C) 2006, Identity Alliance, Thomas Harning <support@identityalliance.com>
  *
@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -78,9 +78,12 @@ static int mscfs_is_ignored(mscfs_t* fs, msc_id objectId)
 	return ignored;
 }
 
+#define MAX_FILES 10000
 int mscfs_push_file(mscfs_t* fs, mscfs_file_t *file)
 {
 	mscfs_cache_t *cache = &fs->cache;
+	if (cache->size >= MAX_FILES)
+		return SC_ERROR_INTERNAL;
 	if(!cache->array || cache->size == cache->totalSize) {
 		int length = cache->totalSize + MSCFS_CACHE_INCREMENT;
 		mscfs_file_t *oldArray;
@@ -96,7 +99,7 @@ int mscfs_push_file(mscfs_t* fs, mscfs_file_t *file)
 	}
 	cache->array[cache->size] = *file;
 	cache->size++;
-	return 0;
+	return SC_SUCCESS;
 }
 
 int mscfs_update_cache(mscfs_t* fs) {
@@ -121,8 +124,10 @@ int mscfs_update_cache(mscfs_t* fs) {
 			} else  {
 				file.ef = 1; /* File is a working elementary file */
 			}
-			
-			mscfs_push_file(fs, &file);
+
+			r = mscfs_push_file(fs, &file);
+			if (r != SC_SUCCESS)
+				return r;
 		}
 		r = fs->listFile(&file, 0, fs->udata);
 		if(r == 0)
@@ -133,14 +138,16 @@ int mscfs_update_cache(mscfs_t* fs) {
 	return fs->cache.size;
 }
 
-void mscfs_check_cache(mscfs_t* fs)
+int mscfs_check_cache(mscfs_t* fs)
 {
+	int r = SC_SUCCESS;
 	if(!fs->cache.array) {
-		mscfs_update_cache(fs);
+		r = mscfs_update_cache(fs);
 	}
+	return r;
 }
 
-int mscfs_lookup_path(mscfs_t* fs, const u8 *path, int pathlen, msc_id* objectId, int isDirectory)
+int mscfs_lookup_path(mscfs_t* fs, const u8 *path, size_t pathlen, msc_id* objectId, int isDirectory)
 {
 	u8* oid = objectId->id;
 	if ((pathlen & 1) != 0) /* not divisible by 2 */
@@ -181,7 +188,7 @@ int mscfs_lookup_path(mscfs_t* fs, const u8 *path, int pathlen, msc_id* objectId
 		oid[2] = path[2];
 		oid[3] = path[3];
 	}
-	
+
 	return 0;
 }
 
@@ -205,7 +212,7 @@ int mscfs_check_selection(mscfs_t *fs, int requiredItem)
 	return 0;
 }
 
-int mscfs_loadFileInfo(mscfs_t* fs, const u8 *path, int pathlen, mscfs_file_t **file_data, int* idx)
+int mscfs_loadFileInfo(mscfs_t* fs, const u8 *path, size_t pathlen, mscfs_file_t **file_data, int* idx)
 {
 	msc_id fullPath = {{0, 0, 0, 0}};
 	int x, rc;
@@ -214,9 +221,11 @@ int mscfs_loadFileInfo(mscfs_t* fs, const u8 *path, int pathlen, mscfs_file_t **
 	if (rc != SC_SUCCESS) {
 		return rc;
 	}
-	
+
 	/* Obtain file information while checking if it exists */
-	mscfs_check_cache(fs);
+	rc = mscfs_check_cache(fs);
+	if (rc < 0)
+		return rc;
 	if(idx) *idx = -1;
 	for(x = 0; x < fs->cache.size; x++) {
 		*file_data = &fs->cache.array[x];
@@ -237,16 +246,16 @@ int mscfs_loadFileInfo(mscfs_t* fs, const u8 *path, int pathlen, mscfs_file_t **
 		ROOT_FILE.size = 0;
 		/* Faked Root ID */
 		ROOT_FILE.objectId = rootId;
-		
+
 		ROOT_FILE.read = 0;
 		ROOT_FILE.write = 0x02; /* User Pin access */
 		ROOT_FILE.delete = 0x02;
-		
+
 		*file_data = &ROOT_FILE;
 		if(idx) *idx = -2;
 	} else if(*file_data == NULL) {
 		return MSCFS_FILE_NOT_FOUND;
 	}
-	
+
 	return 0;
 }

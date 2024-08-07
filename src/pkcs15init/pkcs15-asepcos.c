@@ -13,7 +13,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -221,9 +221,9 @@ static int asepcos_do_store_pin(sc_profile_t *profile, sc_card_t *card,
 {
 	sc_file_t *nfile = NULL;
 	u8  buf[64], sbuf[64], *p = buf, *q = sbuf;
-	int r, akn;
+	int r, akn = 0;
 
-	if (auth_info->auth_type != SC_PKCS15_PIN_AUTH_TYPE_PIN)
+	if (auth_info == NULL || auth_info->auth_type != SC_PKCS15_PIN_AUTH_TYPE_PIN)
 		return SC_ERROR_OBJECT_NOT_VALID;
 
 	/* outer tag */
@@ -318,7 +318,7 @@ static int asepcos_do_store_pin(sc_profile_t *profile, sc_card_t *card,
  */
 static int have_onepin(sc_profile_t *profile)
 {
-        sc_pkcs15_auth_info_t sopin;
+        sc_pkcs15_auth_info_t sopin = {0};
 
         sc_profile_get_pin_info(profile, SC_PKCS15INIT_SO_PIN, &sopin);
 
@@ -354,10 +354,10 @@ static int asepcos_create_pin(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	if (!pin || !pin_len)
 		return SC_ERROR_INVALID_ARGUMENTS;
 
-	if (auth_info->auth_type != SC_PKCS15_PIN_AUTH_TYPE_PIN)
+	if (auth_info == NULL || auth_info->auth_type != SC_PKCS15_PIN_AUTH_TYPE_PIN)
         	return SC_ERROR_OBJECT_NOT_VALID;
 
-	pid = (auth_info->attrs.pin.reference & 0xff) | (((tpath.len >> 1) - 1) << 16);
+	pid = (auth_info->attrs.pin.reference & 0xff) | (int)(((tpath.len >> 1) - 1) << 16);
 
 	/* get the ACL of the application DF */
 	r = sc_select_file(card, &df->path, &tfile);
@@ -393,7 +393,7 @@ static int asepcos_create_pin(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 		/* Create PUK (if specified). Note: we need to create the PUK
 		 * the PIN as the PUK fileid is used in the PIN acl.
 		 */
-		struct sc_pkcs15_auth_info puk_ainfo;
+		struct sc_pkcs15_auth_info puk_ainfo = {0};
 
 		if (auth_info->attrs.pin.flags & SC_PKCS15_PIN_FLAG_SO_PIN)
 			sc_profile_get_pin_info(profile, SC_PKCS15INIT_SO_PUK, &puk_ainfo);
@@ -565,7 +565,8 @@ static int asepcos_create_key(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	sc_pkcs15_object_t *obj)
 {
 	sc_pkcs15_prkey_info_t *kinfo = (sc_pkcs15_prkey_info_t *) obj->data;
-	int       r, len;
+	int       r;
+	size_t    len;
 	u8        buf[512], *p = buf;
 	size_t    blen = kinfo->modulus_length / 8;
 	int       afileid = -1,
@@ -654,7 +655,8 @@ static int asepcos_do_store_rsa_key(sc_pkcs15_card_t *p15card, sc_profile_t *pro
 	sc_pkcs15_object_t *obj, sc_pkcs15_prkey_info_t *kinfo,
 	struct sc_pkcs15_prkey_rsa *key)
 {
-	int       r, klen;
+	int       r;
+	size_t    klen;
 	u8        buf[512], *p = buf;
 	sc_path_t tpath;
 	sc_cardctl_asepcos_change_key_t	ckdata;

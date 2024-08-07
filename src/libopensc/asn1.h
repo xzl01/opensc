@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _OPENSC_ASN1_H
@@ -126,6 +126,10 @@ int sc_asn1_sig_value_rs_to_sequence(struct sc_context *ctx,
 int sc_asn1_sig_value_sequence_to_rs(struct sc_context *ctx,
 		const unsigned char *in, size_t inlen,
                 unsigned char *buf, size_t buflen);
+
+/* ECDSA signature decoding*/
+int sc_asn1_decode_ecdsa_signature(sc_context_t *ctx, const u8 *data, size_t datalen,
+		size_t fieldsize, u8 **out, size_t outlen);
 
 /* long form tags use these */
 /* Same as  SC_ASN1_TAG_* shifted left by 24 bits  */

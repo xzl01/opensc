@@ -8,7 +8,8 @@ dist_noinst_DATA = \
 	LICENSE.compat_getopt compat_getopt.txt \
 	compat_getopt_main.c \
 	README.compat_strlcpy compat_strlcpy.3
-noinst_HEADERS = compat_strlcat.h compat_strlcpy.h compat_strnlen.h compat_getpass.h compat_getopt.h simclist.h libpkcs11.h libscdl.h
+noinst_HEADERS = compat_strlcat.h compat_strlcpy.h compat_strnlen.h compat_getpass.h \
+	compat_getopt.h simclist.h libpkcs11.h libscdl.h compat_overflow.h constant-time.h
 
 AM_CPPFLAGS = -I$(top_srcdir)/src
 
@@ -21,6 +22,7 @@ libcompat_la_SOURCES = \
 	compat_getopt.c \
 	compat_report_rangecheckfailure.c \
 	compat___iob_func.c \
+	compat_overflow.c \
 	simclist.c
 
 compat_getopt_main_LDADD = libcompat.la
@@ -28,6 +30,7 @@ compat_getopt_main_LDADD = libcompat.la
 libpkcs11_la_SOURCES = libpkcs11.c
 
 libscdl_la_SOURCES = libscdl.c
+libscdl_la_LIBADD = $(LDL_LIBS)
 
 TIDY_FLAGS = $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 TIDY_FILES = \
@@ -39,8 +42,10 @@ TIDY_FILES = \
 	compat_getopt.h compat_getopt.c \
 	compat_report_rangecheckfailure.c \
 	compat___iob_func.c \
+	compat_overflow.h compat_overflow.c \
 	simclist.c simclist.h \
-	libpkcs11.c libscdl.c
+	libpkcs11.c libscdl.c \
+	constant-time.h
 
 check-local:
-	if [ -x "$(CLANGTIDY)" ]; then clang-tidy -config='' --checks='$(TIDY_CHECKS)' -header-filter=.* $(addprefix $(srcdir)/,$(TIDY_FILES)) -- $(TIDY_FLAGS); fi
+	if [ -x "$(CLANGTIDY)" ]; then clang-tidy -config='' --checks='$(TIDY_CHECKS)' --warnings-as-errors='$(TIDY_CHECKS)' -header-filter=.* $(addprefix $(srcdir)/,$(TIDY_FILES)) -- $(TIDY_FLAGS); fi

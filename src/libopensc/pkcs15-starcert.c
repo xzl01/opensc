@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -26,6 +26,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "internal.h"
 #include "common/compat_strlcpy.h"
 #include "pkcs15.h"
 #include "cardctl.h"
@@ -50,11 +51,11 @@ typedef struct pdata_st {
 	unsigned int maxlen;
 	unsigned int minlen;
 	unsigned int storedlen;
-	int         flags;	
+	int         flags;
 	int         tries_left;
 	const char  pad_char;
 	int         obj_flags;
-} pindata; 
+} pindata;
 
 typedef struct prdata_st {
 	const char *id;
@@ -87,14 +88,14 @@ static int get_cert_len(sc_card_t *card, sc_path_t *path)
 	if (r < 0)
 		return 0;
 	r = sc_read_binary(card, 0, buf, sizeof(buf), 0);
-	if (r < 0)	
+	if (r < 0)
 		return 0;
 	if (buf[0] != 0x30 || buf[1] != 0x82)
 		return 0;
 	path->index = 0;
-	path->count = ((((size_t) buf[2]) << 8) | buf[3]) + 4;
+	path->count = ((buf[2] << 8) | buf[3]) + 4;
 	return 1;
-} 
+}
 
 static int starcert_detect_card(sc_pkcs15_card_t *p15card)
 {
@@ -114,7 +115,7 @@ static int starcert_detect_card(sc_pkcs15_card_t *p15card)
 	r = sc_read_binary(card, 0, buf, 64, 0);
 	if (r != 64)
 		return SC_ERROR_WRONG_CARD;
-	if (memcmp(buf + 24, STARCERT, strlen(STARCERT))) 
+	if (memcmp(buf + 24, STARCERT, strlen(STARCERT)))
 		return SC_ERROR_WRONG_CARD;
 
 	return SC_SUCCESS;
@@ -167,15 +168,14 @@ static int sc_pkcs15emu_starcert_init(sc_pkcs15_card_t *p15card)
 	r = sc_bin_to_hex(serial.value, serial.len, buf, sizeof(buf), 0);
 	if (r != SC_SUCCESS)
 		return SC_ERROR_INTERNAL;
-	free(p15card->tokeninfo->serial_number);
-	p15card->tokeninfo->serial_number = strdup(buf);
+
+	set_string(&p15card->tokeninfo->serial_number, buf);
 	if (!p15card->tokeninfo->serial_number)
 		return SC_ERROR_INTERNAL;
 	/* the manufacturer ID, in this case Giesecke & Devrient GmbH */
-	free(p15card->tokeninfo->manufacturer_id);
-	p15card->tokeninfo->manufacturer_id = strdup(MANU_ID);
+	set_string(&p15card->tokeninfo->manufacturer_id, MANU_ID);
 	if (!p15card->tokeninfo->manufacturer_id)
-		return SC_ERROR_INTERNAL;
+		goto err;
 
 	/* set certs */
 	for (i = 0; certs[i].label; i++) {
@@ -197,7 +197,7 @@ static int sc_pkcs15emu_starcert_init(sc_pkcs15_card_t *p15card)
 
 		r = sc_pkcs15emu_add_x509_cert(p15card, &cert_obj, &cert_info);
 		if (r < 0)
-			return SC_ERROR_INTERNAL;
+			goto err;
 	}
 	/* set pins */
 	for (i = 0; pins[i].label; i++) {
@@ -226,7 +226,7 @@ static int sc_pkcs15emu_starcert_init(sc_pkcs15_card_t *p15card)
 
 		r = sc_pkcs15emu_add_pin_obj(p15card, &pin_obj, &pin_info);
 		if (r < 0)
-			return SC_ERROR_INTERNAL;
+			goto err;
 	}
 	/* set private keys */
 	for (i = 0; prkeys[i].label; i++) {
@@ -250,19 +250,23 @@ static int sc_pkcs15emu_starcert_init(sc_pkcs15_card_t *p15card)
 
 		r = sc_pkcs15emu_add_rsa_prkey(p15card, &prkey_obj, &prkey_info);
 		if (r < 0)
-			return SC_ERROR_INTERNAL;
+			goto err;
 	}
-		
+
 	/* select the application DF */
 	sc_format_path("3F00DF01", &path);
 	r = sc_select_file(card, &path, &file);
 	if (r != SC_SUCCESS || !file)
-		return SC_ERROR_INTERNAL;
+		goto err;
 	/* set the application DF */
 	sc_file_free(p15card->file_app);
 	p15card->file_app = file;
 
 	return SC_SUCCESS;
+
+err:
+	sc_pkcs15_card_clear(p15card);
+	return SC_ERROR_INTERNAL;
 }
 
 int sc_pkcs15emu_starcert_init_ex(sc_pkcs15_card_t *p15card,

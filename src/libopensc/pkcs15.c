@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -40,6 +40,10 @@
 
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
+#endif
+
+#ifdef ENABLE_ZLIB
+#include "compression.h"
 #endif
 
 static const struct sc_asn1_entry c_asn1_twlabel[] = {
@@ -306,6 +310,7 @@ sc_pkcs15_encode_tokeninfo(sc_context_t *ctx, sc_pkcs15_tokeninfo_t *ti,
 	size_t algo_ref_len = sizeof(ti->supported_algos[0].algo_ref);
 	struct sc_asn1_entry asn1_last_update[C_ASN1_LAST_UPDATE_SIZE];
 	struct sc_asn1_entry asn1_profile_indication[C_ASN1_PROFILE_INDICATION_SIZE];
+	u8 serial[128];
 
 	sc_copy_asn1_entry(c_asn1_toki_attrs, asn1_toki_attrs);
 	sc_copy_asn1_entry(c_asn1_tokeninfo, asn1_tokeninfo);
@@ -340,7 +345,6 @@ sc_pkcs15_encode_tokeninfo(sc_context_t *ctx, sc_pkcs15_tokeninfo_t *ti,
 
 	sc_format_asn1_entry(asn1_toki_attrs + 0, &ti->version, NULL, 1);
 	if (ti->serial_number != NULL) {
-		u8 serial[128];
 		serial_len = 0;
 		if (strlen(ti->serial_number)/2 > sizeof(serial))
 			return SC_ERROR_BUFFER_TOO_SMALL;
@@ -528,7 +532,7 @@ sc_pkcs15_get_lastupdate(struct sc_pkcs15_card *p15card)
 	struct sc_context *ctx  = p15card->card->ctx;
 	struct sc_file *file = NULL;
 	struct sc_asn1_entry asn1_last_update[C_ASN1_LAST_UPDATE_SIZE];
-	unsigned char *content, last_update[32];
+	unsigned char *content, last_update[32] = {0};
 	size_t lupdate_len = sizeof(last_update) - 1;
 	int r, content_len;
 	size_t size;
@@ -544,17 +548,18 @@ sc_pkcs15_get_lastupdate(struct sc_pkcs15_card *p15card)
 		return NULL;
 
 	size = file->size ? file->size : 1024;
+	sc_file_free(file);
 
-	content = calloc(size, 1);
+	content = calloc(1, size);
 	if (!content)
 		return NULL;
 
 	r = sc_read_binary(p15card->card, 0, content, size, 0);
-	if (r < 0)
+	if (r < 0) {
+		free(content);
 		return NULL;
+	}
 	content_len = r;
-
-	sc_file_free(file);
 
 	sc_copy_asn1_entry(c_asn1_last_update, asn1_last_update);
 	sc_format_asn1_entry(asn1_last_update + 0, last_update, &lupdate_len, 0);
@@ -564,9 +569,11 @@ sc_pkcs15_get_lastupdate(struct sc_pkcs15_card *p15card)
 	if (r < 0)
 		return NULL;
 
-	p15card->tokeninfo->last_update.gtime = strdup((char *)last_update);
-	if (!p15card->tokeninfo->last_update.gtime)
-		return NULL;
+	if (asn1_last_update[0].flags & SC_ASN1_PRESENT) {
+		p15card->tokeninfo->last_update.gtime = strdup((char *)last_update);
+		if (!p15card->tokeninfo->last_update.gtime)
+			return NULL;
+	}
 done:
 	sc_log(ctx, "lastUpdate.gtime '%s'", p15card->tokeninfo->last_update.gtime);
 	return p15card->tokeninfo->last_update.gtime;
@@ -859,6 +866,8 @@ sc_pkcs15_card_clear(struct sc_pkcs15_card *p15card)
 		p15card->tokeninfo->seInfo     = NULL;
 		p15card->tokeninfo->num_seInfo = 0;
 	}
+
+	sc_pkcs15_free_app(p15card);
 }
 
 
@@ -910,6 +919,7 @@ sc_dup_app_info(const struct sc_app_info *info)
 		return NULL;
 	}
 	memcpy(out->ddo.value, info->ddo.value, info->ddo.len);
+	out->ddo.len = info->ddo.len;
 
 	return out;
 }
@@ -1070,7 +1080,7 @@ sc_pkcs15_bind_internal(struct sc_pkcs15_card *p15card, struct sc_aid *aid)
 	if (p15card->opts.use_file_cache) {
 		err = sc_pkcs15_read_cached_file(p15card, &tmppath, &buf, &len);
 		if (err == SC_SUCCESS)
-			err = len;
+			err = (int)len;
 	}
 	if (err < 0) {
 		err = sc_read_binary(card, 0, buf, len, 0);
@@ -1144,7 +1154,7 @@ sc_pkcs15_bind_internal(struct sc_pkcs15_card *p15card, struct sc_aid *aid)
 	if (p15card->opts.use_file_cache) {
 		err = sc_pkcs15_read_cached_file(p15card, &tmppath, &buf, &len);
 		if (err == SC_SUCCESS)
-			err = len;
+			err = (int)len;
 	}
 	if (err < 0) {
 		err = sc_read_binary(card, 0, buf, len, 0);
@@ -1209,6 +1219,46 @@ end:
 }
 
 
+const char *pkcs15_get_default_use_file_cache(struct sc_card *card)
+{
+	/* enable file caching by default for cards with static content to avoid
+	 * synchronization problems.
+	 *
+	 * The following list was initialized with the cards that can't be modified
+	 * with OpenSC i.e. which don't have a profile/driver for pkcs15-init. */
+	const char *card_drivers_with_file_cache[] = {
+		"atrust-acos",
+		"belpic",
+		"cac1",
+		"cac",
+		"coolkey",
+		"dnie",
+		"edo",
+		"esteid2018",
+		"flex",
+		"cyberflex",
+		"gemsafeV1",
+		"idprime",
+		"itacns",
+		"jpki",
+		"MaskTech",
+		"mcrd",
+		"myeid",
+		"npa",
+		"nqapplet",
+		"tcos",
+	};
+
+	if (NULL == card || NULL == card->driver || NULL == card->driver->short_name)
+		return "no";
+	for (size_t i = 0; i < (sizeof card_drivers_with_file_cache / sizeof *card_drivers_with_file_cache); i++) {
+		if (0 == strcmp(card->driver->short_name, card_drivers_with_file_cache[i]))
+			return "public";
+	}
+
+	return "no";
+}
+
 int
 sc_pkcs15_bind(struct sc_card *card, struct sc_aid *aid,
 		struct sc_pkcs15_card **p15card_out)
@@ -1217,6 +1267,7 @@ sc_pkcs15_bind(struct sc_card *card, struct sc_aid *aid,
 	struct sc_context *ctx;
 	scconf_block *conf_block = NULL;
 	int r, emu_first, enable_emu;
+	const char *use_file_cache;
 	const char *private_certificate;
 
 	if (card == NULL || p15card_out == NULL) {
@@ -1232,11 +1283,12 @@ sc_pkcs15_bind(struct sc_card *card, struct sc_aid *aid,
 		LOG_FUNC_RETURN(ctx, SC_ERROR_OUT_OF_MEMORY);
 
 	p15card->card = card;
-	p15card->opts.use_file_cache = 0;
+	p15card->opts.use_file_cache = SC_PKCS15_OPTS_CACHE_NO_FILES;
+	use_file_cache = pkcs15_get_default_use_file_cache(card);
 	p15card->opts.use_pin_cache = 1;
 	p15card->opts.pin_cache_counter = 10;
 	p15card->opts.pin_cache_ignore_user_consent = 0;
-	if(0 == strcmp(ctx->app_name, "tokend")) {
+	if (0 == strcmp(ctx->app_name, "tokend")) {
 		private_certificate = "ignore";
 		p15card->opts.private_certificate = SC_PKCS15_CARD_OPTS_PRIV_CERT_IGNORE;
 	} else {
@@ -1246,13 +1298,22 @@ sc_pkcs15_bind(struct sc_card *card, struct sc_aid *aid,
 
 	conf_block = sc_get_conf_block(ctx, "framework", "pkcs15", 1);
 	if (conf_block) {
-		p15card->opts.use_file_cache = scconf_get_bool(conf_block, "use_file_caching", p15card->opts.use_file_cache);
+		use_file_cache = scconf_get_str(conf_block, "use_file_caching", use_file_cache);
 		p15card->opts.use_pin_cache = scconf_get_bool(conf_block, "use_pin_caching", p15card->opts.use_pin_cache);
 		p15card->opts.pin_cache_counter = scconf_get_int(conf_block, "pin_cache_counter", p15card->opts.pin_cache_counter);
 		p15card->opts.pin_cache_ignore_user_consent = scconf_get_bool(conf_block, "pin_cache_ignore_user_consent",
 				p15card->opts.pin_cache_ignore_user_consent);
 		private_certificate = scconf_get_str(conf_block, "private_certificate", private_certificate);
 	}
+
+	if (0 == strcmp(use_file_cache, "yes")) {
+		p15card->opts.use_file_cache = SC_PKCS15_OPTS_CACHE_ALL_FILES;
+	} else if (0 == strcmp(use_file_cache, "public")) {
+		p15card->opts.use_file_cache = SC_PKCS15_OPTS_CACHE_PUBLIC_FILES;
+	} else if (0 == strcmp(use_file_cache, "no")) {
+		p15card->opts.use_file_cache = SC_PKCS15_OPTS_CACHE_NO_FILES;
+	}
+
 	if (0 == strcmp(private_certificate, "protect")) {
 		p15card->opts.private_certificate = SC_PKCS15_CARD_OPTS_PRIV_CERT_PROTECT;
 	} else if (0 == strcmp(private_certificate, "ignore")) {
@@ -1401,7 +1462,7 @@ __sc_pkcs15_search_objects(struct sc_pkcs15_card *p15card, unsigned int class_ma
 			break;
 	}
 
-	return match_count;
+	return (int)match_count;
 }
 
 
@@ -1924,6 +1985,9 @@ sc_pkcs15_free_object(struct sc_pkcs15_object *obj)
 	case SC_PKCS15_TYPE_CERT:
 		sc_pkcs15_free_cert_info((sc_pkcs15_cert_info_t *)obj->data);
 		break;
+	case SC_PKCS15_TYPE_SKEY:
+		sc_pkcs15_free_skey_info((sc_pkcs15_skey_info_t *)obj->data);
+		break;
 	case SC_PKCS15_TYPE_DATA_OBJECT:
 		sc_pkcs15_free_data_info((sc_pkcs15_data_info_t *)obj->data);
 		break;
@@ -2046,6 +2110,7 @@ sc_pkcs15_encode_df(struct sc_context *ctx, struct sc_pkcs15_card *p15card, stru
 		buf = p;
 		memcpy(buf + bufsize, tmp, tmpsize);
 		free(tmp);
+		tmp = NULL;
 		bufsize += tmpsize;
 	}
 	*buf_out = buf;
@@ -2098,7 +2163,7 @@ sc_pkcs15_parse_df(struct sc_pkcs15_card *p15card, struct sc_pkcs15_df *df)
 		sc_log(ctx, "unknown DF type: %d", df->type);
 		LOG_FUNC_RETURN(ctx, SC_ERROR_INVALID_ARGUMENTS);
 	}
-	r = sc_pkcs15_read_file(p15card, &df->path, &buf, &bufsize);
+	r = sc_pkcs15_read_file(p15card, &df->path, &buf, &bufsize, 0);
 	LOG_TEST_RET(ctx, r, "pkcs15 read file failed");
 
 	p = buf;
@@ -2128,6 +2193,10 @@ sc_pkcs15_parse_df(struct sc_pkcs15_card *p15card, struct sc_pkcs15_df *df)
 			free(obj);
 			sc_log(ctx, "%s: Error adding object", sc_strerror(r));
 			goto ret;
+		}
+		while (bufsize > 0 && *p == 00) {
+			bufsize--;
+			p++;
 		}
 	};
 
@@ -2336,10 +2405,59 @@ sc_pkcs15_parse_unusedspace(const unsigned char *buf, size_t buflen, struct sc_p
 	return 0;
 }
 
+static int decompress_file(sc_card_t *card, unsigned char *buf, size_t buflen,
+		unsigned char **out, size_t *outlen, unsigned long flags)
+{
+	LOG_FUNC_CALLED(card->ctx);
+#ifdef ENABLE_ZLIB
+	int rv = SC_SUCCESS;
+	int method = 0;
+
+	if (flags & SC_FILE_FLAG_COMPRESSED_GZIP) {
+		method = COMPRESSION_GZIP;
+	} else if (flags & SC_FILE_FLAG_COMPRESSED_ZLIB) {
+		method = COMPRESSION_ZLIB;
+	} else {
+		method = COMPRESSION_AUTO;
+	}
+
+	rv = sc_decompress_alloc(out, outlen, buf, buflen, method);
+	if (rv != SC_SUCCESS) {
+		sc_log(card->ctx,  "Decompression failed: %d", rv);
+		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_DATA);
+	}
+	LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
+#else
+	sc_log(card->ctx, "Compression not supported, no zlib");
+	LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
+#endif
+}
+
+int
+sc_decode_do53(sc_context_t *ctx, u8 **data, size_t *data_len,
+		const u8 *buf, size_t buflen)
+{
+	struct sc_asn1_entry c_asn1_do53[] = {
+		{ "do53", SC_ASN1_OCTET_STRING, SC_ASN1_APP|0x13, SC_ASN1_ALLOC|SC_ASN1_UNSIGNED, NULL, NULL },
+		{ NULL, 0, 0, 0, NULL, NULL }
+	};
+	struct sc_asn1_entry asn1_do53[2];
+	int r;
+
+	LOG_FUNC_CALLED(ctx);
+	sc_copy_asn1_entry(c_asn1_do53, asn1_do53);
+	sc_format_asn1_entry(asn1_do53, data, data_len, 0);
+
+	r = sc_asn1_decode(ctx, asn1_do53, buf, buflen, NULL, NULL);
+	LOG_TEST_RET(ctx, r, "ASN.1 parsing of do-53 failed");
+
+	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
+}
+
 
 int
 sc_pkcs15_read_file(struct sc_pkcs15_card *p15card, const struct sc_path *in_path,
-		unsigned char **buf, size_t *buflen)
+		unsigned char **buf, size_t *buflen, int private_data)
 {
 	struct sc_context *ctx;
 	struct sc_file *file = NULL;
@@ -2356,7 +2474,8 @@ sc_pkcs15_read_file(struct sc_pkcs15_card *p15card, const struct sc_path *in_pat
 	sc_log(ctx, "path=%s, index=%u, count=%d", sc_print_path(in_path), in_path->index, in_path->count);
 
 	r = -1; /* file state: not in cache */
-	if (p15card->opts.use_file_cache) {
+	if (p15card->opts.use_file_cache
+	    && ((p15card->opts.use_file_cache & SC_PKCS15_OPTS_CACHE_ALL_FILES) || !private_data)) {
 		r = sc_pkcs15_read_cached_file(p15card, in_path, &data, &len);
 
 		if (!r && in_path->aid.len > 0 && in_path->len >= 2)   {
@@ -2378,22 +2497,49 @@ sc_pkcs15_read_file(struct sc_pkcs15_card *p15card, const struct sc_path *in_pat
 
 		/* Handle the case where the ASN.1 Path object specified
 		 * index and length values */
-		if (in_path->count < 0) {
-			if (file->size)
-				len = file->size;
-			else
-				len = 1024;
-			offset = 0;
-		}
-		else {
-			offset = in_path->index;
-			len = in_path->count;
-			/* Make sure we're within proper bounds */
-			if (offset >= file->size || offset + len > file->size) {
-				r = SC_ERROR_INVALID_ASN1_OBJECT;
+
+		if (file->ef_structure == SC_FILE_EF_LINEAR_VARIABLE) {
+
+			// in_path->index: record_no
+			// in_path->count: ignored!
+
+			if(file->record_length > 0) {
+				if(file->record_length > MAX_FILE_SIZE) {
+					len = MAX_FILE_SIZE;
+					sc_log(ctx, "  record size truncated, encoded length: %"SC_FORMAT_LEN_SIZE_T"u", file->record_length);
+				} else {
+					len = file->record_length;
+				}
+			} else {
+				len = MAX_FILE_SIZE;
+			}
+
+			if ((in_path->index <= 0) || (in_path->index > (int)(file->record_count))) {
+				sc_log(ctx, "  record number out of bounds: %d", in_path->index);
+				r = SC_ERROR_RECORD_NOT_FOUND;
 				goto fail_unlock;
 			}
+
+		} else {
+
+			if (in_path->count < 0) {
+				if (file->size)
+					len = (file->size > MAX_FILE_SIZE)? MAX_FILE_SIZE:file->size;
+				else
+					len = 1024;
+				offset = 0;
+			}
+			else {
+				offset = in_path->index;
+				len = in_path->count;
+				/* Make sure we're within proper bounds */
+				if (offset >= file->size || offset + len > file->size) {
+					r = SC_ERROR_INVALID_ASN1_OBJECT;
+					goto fail_unlock;
+				}
+			}
 		}
+
 		data = malloc(len);
 		if (data == NULL) {
 			r = SC_ERROR_OUT_OF_MEMORY;
@@ -2410,7 +2556,7 @@ sc_pkcs15_read_file(struct sc_pkcs15_card *p15card, const struct sc_path *in_pat
 				if (l > 256) {
 					l = 256;
 				}
-				r = sc_read_record(p15card->card, i, head, l, SC_RECORD_BY_REC_NR);
+				r = sc_read_record(p15card->card, i, 0, head, l, SC_RECORD_BY_REC_NR);
 				if (r == SC_ERROR_RECORD_NOT_FOUND)
 					break;
 				if (r < 0) {
@@ -2432,20 +2578,48 @@ sc_pkcs15_read_file(struct sc_pkcs15_card *p15card, const struct sc_path *in_pat
 			}
 			len = head-data;
 		}
+		else if (file->ef_structure == SC_FILE_EF_LINEAR_VARIABLE) {
+			r = sc_read_record(p15card->card, in_path->index, (unsigned)offset, data, len, SC_RECORD_BY_REC_NR);
+			if (r < 0) {
+				goto fail_unlock;
+			}
+			/* sc_read_record may return less than requested */
+			len = r;
+		}
 		else {
-			r = sc_read_binary(p15card->card, offset, data, len, 0);
+			unsigned long flags = 0;
+			r = sc_read_binary(p15card->card, (unsigned)offset, data, len, &flags);
 			if (r < 0) {
 				goto fail_unlock;
 			}
 			/* sc_read_binary may return less than requested */
 			len = r;
+
+			if (flags & SC_FILE_FLAG_COMPRESSED_AUTO
+			    || flags & SC_FILE_FLAG_COMPRESSED_ZLIB
+			    || flags & SC_FILE_FLAG_COMPRESSED_GZIP) {
+				unsigned char *decompressed_buf = NULL;
+				size_t decompressed_len = 0;
+				r = decompress_file(p15card->card, data, len, &decompressed_buf, &decompressed_len, flags);
+				if (r != SC_SUCCESS) {
+					goto fail_unlock;
+				}
+				free(data);
+				data = decompressed_buf;
+				len = decompressed_len;
+			}
 		}
 		sc_unlock(p15card->card);
 
 		sc_file_free(file);
 
-		if (len && p15card->opts.use_file_cache) {
+		if (len && p15card->opts.use_file_cache
+		    && ((p15card->opts.use_file_cache & SC_PKCS15_OPTS_CACHE_ALL_FILES) || !private_data)) {
 			sc_pkcs15_cache_file(p15card, in_path, data, len);
+		}
+		if (len == 0) {
+			free(data);
+			data = NULL;
 		}
 	}
 	*buf = data;
@@ -2557,8 +2731,7 @@ void sc_pkcs15_free_object_content(struct sc_pkcs15_object *obj)
 			|| SC_PKCS15_TYPE_SKEY & obj->type
 			|| SC_PKCS15_TYPE_PRKEY & obj->type) {
 			/* clean everything that potentially contains a secret */
-			sc_mem_clear(obj->content.value, obj->content.len);
-			sc_mem_secure_free(obj->content.value, obj->content.len);
+			sc_mem_secure_clear_free(obj->content.value, obj->content.len);
 		} else {
 			free(obj->content.value);
 		}
@@ -2809,7 +2982,8 @@ sc_pkcs15_get_object_guid(struct sc_pkcs15_card *p15card, const struct sc_pkcs15
 	struct sc_serial_number serialnr;
 	struct sc_pkcs15_id  id;
 	unsigned char guid_bin[SC_PKCS15_MAX_ID_SIZE + SC_MAX_SERIALNR];
-	int rv, guid_bin_size;
+	int rv;
+	size_t guid_bin_size;
 
 	LOG_FUNC_CALLED(ctx);
 	if(!out || !out_size)

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -94,7 +94,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID,	/* the slot's ID */
 	sc_log(context, "C_OpenSession handle: 0x%lx", session->handle);
 
 out:
-	sc_log(context, "C_OpenSession() = %s", lookup_enum(RV_T, rv));
+	SC_LOG_RV("C_OpenSession() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -126,6 +126,8 @@ static CK_RV sc_pkcs11_close_session(CK_SESSION_HANDLE hSession)
 			slot->p11card->framework->logout(slot);
 		}
 	}
+	for (size_t i = 0; i < SC_PKCS11_OPERATION_MAX; i++)
+		sc_pkcs11_release_operation(&session->operation[i]);
 
 	if (list_delete(&sessions, session) != 0)
 		sc_log(context, "Could not delete session from list!");
@@ -250,7 +252,8 @@ CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	CK_RV rv;
 	struct sc_pkcs11_session *session;
 	struct sc_pkcs11_slot *slot;
-	int logged_out;
+	const char *name;
+	int card_status = 0, logged_out = 0;
 
 	if (pInfo == NULL_PTR)
 		return CKR_ARGUMENTS_BAD;
@@ -273,16 +276,20 @@ CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	pInfo->ulDeviceError = 0;
 
 	slot = session->slot;
-	logged_out = (slot_get_logged_in_state(slot) == SC_PIN_STATE_LOGGED_OUT);
-	if (logged_out && slot->login_user >= 0) {
+	card_status = slot_get_card_state(slot);
+	if (!(card_status & SC_READER_CARD_PRESENT) || card_status & SC_READER_CARD_CHANGED) {
+		/* Card was removed or reinserted, invalidate all sessions */
 		slot->login_user = -1;
 		sc_pkcs11_close_all_sessions(session->slot->id);
 		rv = CKR_SESSION_HANDLE_INVALID;
 		goto out;
 	}
+
+	/* Check whether the user is logged in the card */
+	logged_out = (slot_get_logged_in_state(slot) == SC_PIN_STATE_LOGGED_OUT);
 	if (slot->login_user == CKU_SO && !logged_out) {
 		pInfo->state = CKS_RW_SO_FUNCTIONS;
-	} else if ((slot->login_user == CKU_USER && !logged_out) || (!(slot->token_info.flags & CKF_LOGIN_REQUIRED))) {
+	} else if ((slot->login_user == CKU_USER && !logged_out) || !(slot->token_info.flags & CKF_LOGIN_REQUIRED)) {
 		pInfo->state = (session->flags & CKF_RW_SESSION)
 		    ? CKS_RW_USER_FUNCTIONS : CKS_RO_USER_FUNCTIONS;
 	} else {
@@ -291,7 +298,11 @@ CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	}
 
 out:
-	sc_log(context, "C_GetSessionInfo(0x%lx) = %s", hSession, lookup_enum(RV_T, rv));
+	name = lookup_enum(RV_T, rv);
+	if (name)
+		sc_log(context, "C_GetSessionInfo(0x%lx) = %s", hSession, name);
+	else
+		sc_log(context, "C_GetSessionInfo(0x%lx) = 0x%lx", hSession, rv);
 	sc_pkcs11_unlock();
 	return rv;
 }

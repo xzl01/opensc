@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #define __deref
@@ -22,21 +22,14 @@
 #define __deref_opt_out_bcount(x)
 #define __deref_out_bcount(x)
 #define __deref_out_bcount_opt(x)
-#define __deref_out_ecount(x)
 #define __in
-#define __in_bcount(x)
 #define __in_bcount_opt(x)
-#define __in_ecount(x)
 #define __in_opt
 #define __inout
-#define __inout_bcount_full(x)
 #define __inout_bcount_opt(x)
 #define __out
-#define __out_bcount(x)
-#define __out_bcount_full(x)
 #define __out_bcount_part_opt(x,y)
 #define __out_bcount_part_opt(x,y)
-#define __out_ecount(x)
 #define __out_opt
 #define __struct_bcount(x)
 #define __success(x)

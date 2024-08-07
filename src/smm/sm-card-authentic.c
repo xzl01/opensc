@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -59,11 +59,10 @@ sm_oberthur_diversify_keyset(struct sc_context *ctx, struct sm_info *sm_info,
 	unsigned char *tmp;
 	int rv = 0, ii, tmp_len;
 
-	if (gp_keyset->kmc_len == 48)   {
+	if (gp_keyset->kmc_len == 48) {
 		for (ii=0; ii<3; ii++)
 			memcpy(keys[ii], gp_keyset->kmc + 16*ii, 16);
-	}
-	else if (gp_keyset->kmc_len == 16 || gp_keyset->kmc_len == 0)   {
+	} else if (gp_keyset->kmc_len == 16 || gp_keyset->kmc_len == 0) {
 		if (gp_keyset->kmc_len == 16)
 			memcpy(master_key, gp_keyset->kmc, 16);
 		sc_debug(ctx, SC_LOG_DEBUG_SM, "KMC: %s", sc_dump_hex(master_key, sizeof(master_key)));
@@ -79,20 +78,21 @@ sm_oberthur_diversify_keyset(struct sc_context *ctx, struct sm_info *sm_info,
 
 			sc_debug(ctx, SC_LOG_DEBUG_SM, "key_buf:%s", sc_dump_hex(key_buff, 16));
 
-			rv = sm_encrypt_des_ecb3(master_key, key_buff, sizeof(key_buff), &tmp, &tmp_len);
+			rv = sm_encrypt_des_ecb3(ctx, master_key, key_buff, sizeof(key_buff), &tmp, &tmp_len);
 			LOG_TEST_RET(ctx, rv, "GP init session: cannot derive key");
 
 			memcpy(keys[ii], tmp, sizeof(gp_keyset->enc));
 			free(tmp);
 		}
-	}
-	else   {
+	} else {
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_DATA, "GP init session: invalid KMC data");
 	}
 
-	if (!rv && ctx)   {
-		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "Card challenge", gp_session->card_challenge, sizeof(gp_session->card_challenge));
-		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "Host challenge", gp_session->host_challenge, sizeof(gp_session->host_challenge));
+	if (!rv && ctx) {
+		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "Card challenge", gp_session->card_challenge,
+				sizeof(gp_session->card_challenge));
+		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "Host challenge", gp_session->host_challenge,
+				sizeof(gp_session->host_challenge));
 		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "ENC", gp_keyset->enc, sizeof(gp_keyset->enc));
 		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "MAC", gp_keyset->mac, sizeof(gp_keyset->mac));
 		sc_debug_hex(ctx, SC_LOG_DEBUG_SM, "KEK", gp_keyset->kek, sizeof(gp_keyset->kek));
@@ -132,14 +132,16 @@ sm_authentic_get_apdus(struct sc_context *ctx, struct sm_info *sm_info,
 
 	sc_debug(ctx, SC_LOG_DEBUG_SM, "SM get APDUs: rdata:%p, init_len:%"SC_FORMAT_LEN_SIZE_T"u",
 	       rdata, init_len);
-	sc_debug(ctx, SC_LOG_DEBUG_SM, "SM get APDUs: serial %s", sc_dump_hex(sm_info->serialnr.value, sm_info->serialnr.len));
+	sc_debug(ctx, SC_LOG_DEBUG_SM, "SM get APDUs: serial %s",
+			sc_dump_hex(sm_info->serialnr.value, sm_info->serialnr.len));
 
-	if (init_data)   {
-		rv = sm_gp_external_authentication(ctx, sm_info, init_data, init_len, rdata, sm_oberthur_diversify_keyset);
+	if (init_data) {
+		rv = sm_gp_external_authentication(ctx, sm_info, init_data, init_len, rdata,
+				sm_oberthur_diversify_keyset);
 		LOG_TEST_RET(ctx, rv, "SM get APDUs: cannot authenticate card");
 	}
 
-	switch (sm_info->cmd)  {
+	switch (sm_info->cmd) {
 	case SM_CMD_APDU_TRANSMIT:
 		rv = sm_authentic_encode_apdu(ctx, sm_info);
 		LOG_TEST_RET(ctx, rv, "SM get APDUs: cannot encode APDU");

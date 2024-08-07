@@ -19,7 +19,7 @@ app default {
 	# Special values 'stdout' and 'stderr' are recognized.
 	# Default: stderr
 	#
-	# debug_file = @DEBUG_FILE@
+	# debug_file = @DEBUG_FILE@;
 
 	# PKCS#15 initialization / personalization
 	# profiles directory for pkcs15-init.
@@ -133,7 +133,7 @@ app default {
 		# max_recv_size = 65536;
 	}
 
-	# Whitelist of card drivers to load at start-up
+	# Allowlist of card drivers to load at start-up
 	#
 	# The supported internal card driver names can be retrieved
 	# from the output of:
@@ -209,6 +209,40 @@ app default {
 		# it is not possible to set it in any other way.
 		#
 		#can = 123456;
+	}
+
+	card_driver eoi {
+		# CAN is required to establish connection
+		# with the card. When using contact reader
+		# it is read (and decrypted) from the card.
+		# When using contactless reader, CAN has to
+		# be specified here or using the EOI_CAN
+		# environment variable.
+		#can = 123456;
+		#
+		# To hide unneeded slots it's also
+		# recommended to set
+		#   create_slots_for_pins = "user,sign";
+		# in the 'pkcs11' section below
+	}
+
+	card_driver PIV-II {
+		# *NOTE* The following are only usable if OpenSC is configured with --enable-piv-sm
+
+		# "piv_pairing_code"
+		# Virtual Contact Interface (VCI) an optional feature, to allow
+		# contactless access to card as if it was using the contact reader.
+		# VCI requires SM. It may also require a pairing code which may be printed on the
+		# card, given to card owner when card issued or available from the card when used
+		# with a contact reader. Contact your card issuing agency for details on what your
+		# card supports.
+		# Pairing code can be set in opensc.conf or via environment (recommended).
+		# It is an 8 digit string.
+		# Default: no pairing code.
+		# piv_pairing_code = 12345678;
+		# May be set via environment: PIV_PAIRING_CODE=12345678
+
+		# Environment variables override opensc.conf
 	}
 
 	# In addition to the built-in list of known cards in the
@@ -782,6 +816,10 @@ app default {
 		notify_pin_bad_text = "GoID ist gesperrt";
 	}
 
+	# Disable PKCS#1 v1.5 padding in HW.
+	# Default: decipher
+	# disable_hw_pkcs1_padding = both;
+
 	secure_messaging local_authentic  {
 		# name of external SM module
 		# module_name = @DEFAULT_SM_MODULE@;
@@ -883,8 +921,8 @@ app default {
 		# inaccessible from the user account. Use a global caching directory if
 		# you wish to share the cached information.
 		#
-		# Default: false
-		# use_file_caching = true;
+		# Default: `public` for static cards, `false` otherwise
+		# use_file_caching = public;
 		#
 		# set a path for caching
 		# so you do not use the env variables and for pam_pkcs11
@@ -918,7 +956,7 @@ app default {
 		#
 		# Prefer pkcs15 emulation code before
 		# the normal pkcs15 processing.
-		# Some cards (like esteid and pteid) work in emu-only mode,
+		# Some cards (like pteid) work in emu-only mode,
 		# and do not depend on this option.
 		#
 		# Default: no
@@ -929,8 +967,10 @@ app default {
 		# enable_builtin_emulation = no;
 		#
 		# List of the builtin pkcs15 emulators to test
-		# Default: esteid, openpgp, tcos, starcert, itacns, actalis, atrust-acos, gemsafeGPK, gemsafeV1, tccardos, PIV-II;
-		# builtin_emulators = openpgp;
+		# Special value of 'internal' will try all not disabled builtin pkcs15 emulators.
+		# Special value of 'old' will try all disabled pkcs15 emulators. 
+		# Default: internal;
+		# builtin_emulators = old, internal;
 
 		# additional settings per driver
 		#
@@ -956,6 +996,8 @@ app default {
 		#
 		# - disable: do not expose application in PKCS15 framework
 		#            default 'false'
+		# - user_pin and sign_pin: labels of PIN objects that will be used as
+		#            user & sign PINs. Otherwise the first suitable one will be used.
 		application E828BD080FD25047656E65726963 {
 			type = generic;
 			model = "ECC Generic PKI";
@@ -975,6 +1017,21 @@ app default {
 		application E828BD080FD2500000040201 {
 			type = protected;
 			model = "Adèle Admin-2";
+		}
+
+		# Slovenian eID - low level (pinless, "Prijava brez PIN-a")
+		application E828BD080F014E585031 {
+			model = "ChipDocLite";
+			disable = true;
+			user_pin = "Norm PIN";
+		}
+
+		# Slovenian eID - high level (QES, "Podpis in prijava")
+		application E828BD080F014E585030 {
+			model = "ChipDocLite";
+			# disable = true;
+			user_pin = "Norm PIN";
+			sign_pin = "Sig PIN";
 		}
 	}
 }
@@ -1104,7 +1161,7 @@ app opensc-pkcs11 {
 	}
 }
 
-app onepin-opensc-pkcs11 {
+app "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" {
 	pkcs11 {
 		slots_per_card = 1;
 	}

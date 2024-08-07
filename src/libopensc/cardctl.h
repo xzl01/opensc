@@ -2,6 +2,7 @@
  * cardctl.h: card_ctl command numbers
  *
  * Copyright (C) 2003  Olaf Kirch <okir@lse.de>
+ * Copyright (C) 2018-2019 GSMK - Gesellschaft für Sichere Mobile Kommunikation mbH
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _OPENSC_CARDCTL_H
@@ -40,33 +41,17 @@ enum {
 	SC_CARDCTL_LIFECYCLE_GET,
 	SC_CARDCTL_LIFECYCLE_SET,
 	SC_CARDCTL_GET_SERIALNR,
+	SC_CARDCTL_GET_CHANGE_COUNTER,
 	SC_CARDCTL_GET_SE_INFO,
 	SC_CARDCTL_GET_CHV_REFERENCE_IN_SE,
 	SC_CARDCTL_PKCS11_INIT_TOKEN,
 	SC_CARDCTL_PKCS11_INIT_PIN,
 
 	/*
-	 * GPK specific calls
-	 */
-	SC_CARDCTL_GPK_BASE = _CTL_PREFIX('G', 'P', 'K'),
-	SC_CARDCTL_GPK_VARIANT,
-	SC_CARDCTL_GPK_LOCK,
-	SC_CARDCTL_GPK_PKINIT,
-	SC_CARDCTL_GPK_PKLOAD,
-	SC_CARDCTL_GPK_IS_LOCKED,
-	SC_CARDCTL_GPK_GENERATE_KEY,
-
-	/*
 	 * Cryptoflex specific calls
 	 */
 	SC_CARDCTL_CRYPTOFLEX_BASE = _CTL_PREFIX('C', 'F', 'X'),
 	SC_CARDCTL_CRYPTOFLEX_GENERATE_KEY,
-
-	/*
-	 * MioCOS specific calls
-	 */
-	SC_CARDCTL_MIOCOS_BASE = _CTL_PREFIX('M', 'I', 'O'),
-	SC_CARDCTL_MIOCOS_CREATE_AC,
 
 	/*
 	 * TCOS specific calls
@@ -95,12 +80,6 @@ enum {
 	SC_CARDCTL_STARCOS_GENERATE_KEY,
 
 	/*
-	 * JCOP specific calls
-	 */
-	SC_CARDCTL_JCOP_BASE = _CTL_PREFIX('J', 'C', 'P'),
-	SC_CARDCTL_JCOP_GENERATE_KEY,
-
-	/*
 	 * Oberthur specific calls
 	 */
 	SC_CARDCTL_OBERTHUR_BASE = _CTL_PREFIX('O', 'B', 'R'),
@@ -117,17 +96,6 @@ enum {
 	SC_CARDCTL_SETCOS_GENERATE_STORE_KEY,
 	SC_CARDCTL_SETCOS_ACTIVATE_FILE,
 
-	/*
-	 * Incrypto34 specific calls
-	 */
-	SC_CARDCTL_INCRYPTO34_BASE = _CTL_PREFIX('I', '3', '4'),
-	SC_CARDCTL_INCRYPTO34_PUT_DATA_FCI,
-	SC_CARDCTL_INCRYPTO34_PUT_DATA_OCI,
-	SC_CARDCTL_INCRYPTO34_PUT_DATA_SECI,
-	SC_CARDCTL_INCRYPTO34_GENERATE_KEY,
-	SC_CARDCTL_INCRYPTO34_CHANGE_KEY_DATA,
-	SC_CARDCTL_INCRYPTO34_ERASE_FILES,
-	
 	/*
 	 * Muscle specific calls
 	 */
@@ -158,7 +126,7 @@ enum {
  	SC_CARDCTL_RUTOKEN_GET_INFO,
  	/* NON STANDARD  */
  	SC_CARDCTL_RUTOKEN_GET_DO_INFO,
- 	SC_CARDCTL_RUTOKEN_GOST_ENCIPHER, 
+ 	SC_CARDCTL_RUTOKEN_GOST_ENCIPHER,
  	SC_CARDCTL_RUTOKEN_GOST_DECIPHER,
 	SC_CARDCTL_RUTOKEN_FORMAT_INIT,
 	SC_CARDCTL_RUTOKEN_FORMAT_END,
@@ -263,6 +231,7 @@ enum {
 	SC_CARDCTL_OPENPGP_BASE = _CTL_PREFIX('P', 'G', 'P'),
 	SC_CARDCTL_OPENPGP_GENERATE_KEY,
 	SC_CARDCTL_OPENPGP_STORE_KEY,
+	SC_CARDCTL_OPENPGP_SELECT_DATA,
 
 	/*
 	 * SmartCard-HSM
@@ -273,6 +242,8 @@ enum {
 	SC_CARDCTL_SC_HSM_IMPORT_DKEK_SHARE,
 	SC_CARDCTL_SC_HSM_WRAP_KEY,
 	SC_CARDCTL_SC_HSM_UNWRAP_KEY,
+	SC_CARDCTL_SC_HSM_REGISTER_PUBLIC_KEY,
+	SC_CARDCTL_SC_HSM_PUBLIC_KEY_AUTH_STATUS,
 
 	/*
 	 * DNIe specific calls
@@ -313,6 +284,7 @@ enum {
 	SC_CARDCTL_IDPRIME_GET_NEXT_OBJECT,
 	SC_CARDCTL_IDPRIME_FINAL_GET_OBJECTS,
 	SC_CARDCTL_IDPRIME_GET_TOKEN_NAME,
+	SC_CARDCTL_IDPRIME_GET_PIN_ID,
 
 };
 
@@ -360,61 +332,6 @@ struct sc_cardctl_parsed_token_info {
 };
 
 /*
- * GPK lock file.
- * Parent DF of file must be selected.
- */
-struct sc_cardctl_gpk_lock {
-	struct sc_file *	file;
-	unsigned int		operation;
-};
-
-/*
- * GPK initialize private key file.
- * Parent DF must be selected.
- */
-struct sc_cardctl_gpk_pkinit {
-	struct sc_file *	file;
-	unsigned int		privlen;
-};
-
-/*
- * GPK load private key portion.
- */
-struct sc_cardctl_gpk_pkload {
-	struct sc_file *	file;
-	u8 *			data;
-	unsigned int		len;
-	unsigned int		datalen;
-};
-
-struct sc_cardctl_gpk_genkey {
-	unsigned int		fid;
-	unsigned int		privlen;
-	unsigned char *		pubkey;
-	unsigned int		pubkey_len;
-};
-
-enum {
-	SC_CARDCTL_MIOCOS_AC_PIN,
-	SC_CARDCTL_MIOCOS_AC_CHAL,
-	SC_CARDCTL_MIOCOS_AC_LOGICAL,
-	SC_CARDCTL_MIOCOS_AC_SMARTPIN
-};
-
-/*
- * MioCOS AC info
- */
-struct sc_cardctl_miocos_ac_info {
-	int type;
-	int ref;
-	int max_tries;
-	int enable_ac;		/* only applicable to PINs */
-	u8 key_value[8];
-	int max_unblock_tries;	/* same here */
-	u8 unblock_value[8];	/* and here */
-};
-
-/*
  * Siemens CardOS PIN info
  */
 struct sc_cardctl_cardos_obj_info {
@@ -424,7 +341,7 @@ struct sc_cardctl_cardos_obj_info {
 
 struct sc_cardctl_cardos_genkey_info {
 	unsigned int	key_id;
-	unsigned int	key_bits;
+	size_t	key_bits;
 	unsigned short	fid;
 };
 
@@ -438,27 +355,11 @@ struct sc_cardctl_cardos_pass_algo_flags {
 };
 
 /*
- * Incrypto34 PIN info
- */
-struct sc_cardctl_incrypto34_obj_info {
-	u8 *		data;
-	size_t		len;
-	unsigned int	key_id;
-	unsigned int	key_class;
-};
-
-struct sc_cardctl_incrypto34_genkey_info {
-	unsigned int	key_id;
-	unsigned int	key_bits;
-	unsigned short	fid;
-};
-
-/*
  * Cryptoflex info
  */
 struct sc_cardctl_cryptoflex_genkey_info {
 	unsigned int	key_num;
-	unsigned int	key_bits;
+	size_t	key_bits;
 	unsigned long	exponent;
 	unsigned char *	pubkey;
 	unsigned int	pubkey_len;
@@ -501,14 +402,6 @@ typedef struct sc_starcos_gen_key_data_st {
 	u8	*modulus;
 } sc_starcos_gen_key_data;
 
-struct sc_cardctl_jcop_genkey  {
-     unsigned long exponent;
-     sc_path_t pub_file_ref;
-     sc_path_t pri_file_ref;
-     unsigned char *	pubkey;
-     unsigned int	pubkey_len;
-};
-
 /*
  * Oberthur ex_data stuff
  */
@@ -518,21 +411,19 @@ enum SC_CARDCTL_OBERTHUR_KEY_TYPE {
 	SC_CARDCTL_OBERTHUR_KEY_RSA_PUBLIC = 0xA1,
 	SC_CARDCTL_OBERTHUR_KEY_RSA_SFM,
 	SC_CARDCTL_OBERTHUR_KEY_RSA_CRT,
-	SC_CARDCTL_OBERTHUR_KEY_DSA_PUBLIC,
-	SC_CARDCTL_OBERTHUR_KEY_DSA_PRIVATE,
 	SC_CARDCTL_OBERTHUR_KEY_EC_CRT,
 	SC_CARDCTL_OBERTHUR_KEY_EC_PUBLIC
 };
 
 struct sc_cardctl_oberthur_genkey_info {
 	unsigned int    id_prv, id_pub;
-	unsigned int    key_bits;
+	size_t    key_bits;
 	unsigned long   exponent;
 	unsigned char * pubkey;
-	unsigned int    pubkey_len;
+	size_t    pubkey_len;
 
 	int     method;     /* SC_AC_XXX */
-	int     key_ref;    /* key reference */		
+	int     key_ref;    /* key reference */
 };
 
 struct sc_cardctl_oberthur_updatekey_info {
@@ -542,14 +433,14 @@ struct sc_cardctl_oberthur_updatekey_info {
 	unsigned int    data_len;
 
 	unsigned char   id[256];
-	unsigned int    id_len;
+	size_t    id_len;
 };
 
 struct sc_cardctl_oberthur_createpin_info {
 	unsigned int type;
 	unsigned int ref;
 	const unsigned char *pin;
-	unsigned int pin_len;
+	size_t pin_len;
 	unsigned int pin_tries;
 	const unsigned char *puk;
 	unsigned int puk_len;
@@ -569,12 +460,12 @@ struct sc_cardctl_setcos_data_obj {
 
 struct sc_cardctl_setcos_gen_store_key_info {
 	int             op_type;
-	unsigned int    mod_len;     /* in bits */
-	unsigned int    pubexp_len;  /* in bits */
+	size_t    mod_len;     /* in bits */
+	size_t    pubexp_len;  /* in bits */
 	unsigned char  *pubexp;
-	unsigned int    primep_len;  /* in bits */
+	size_t    primep_len;  /* in bits */
 	unsigned char  *primep;
-	unsigned int    primeq_len;  /* in bits */
+	size_t    primeq_len;  /* in bits */
 	unsigned char  *primeq;
 };
 
@@ -583,7 +474,7 @@ struct sc_cardctl_setcos_gen_store_key_info {
  */
 typedef struct sc_cardctl_muscle_gen_key_info {
 	int 	keyType;
-	int 	keySize;
+	size_t 	keySize;
 	int 	privateKeyLocation;
 	int 	publicKeyLocation;
 } sc_cardctl_muscle_gen_key_info_t;
@@ -592,7 +483,7 @@ typedef struct sc_cardctl_muscle_gen_key_info {
 typedef struct sc_cardctl_muscle_key_info {
 	int 	keyType;
 	int 	keyLocation;
-	int 	keySize;
+	size_t 	keySize;
 	size_t 	modLength;
 	u8* 	modValue;
 	size_t 	expLength;
@@ -656,7 +547,7 @@ typedef struct {
  *  RuToken types and constants
  */
 
-#define SC_RUTOKEN_DO_PART_BODY_LEN    199    
+#define SC_RUTOKEN_DO_PART_BODY_LEN    199
 #define SC_RUTOKEN_DO_HDR_LEN  32
 
 /*   DO Types  */
@@ -683,7 +574,7 @@ typedef struct {
 
 /*  DO ID  */
 #define SC_RUTOKEN_ID_CURDF_RESID_FLAG   0x80        /*  DO placed in current DF  */
-                                            
+
 #define SC_RUTOKEN_DEF_ID_GCHV_ADMIN       0x01      /*  ID DO ADMIN  */
 #define SC_RUTOKEN_DEF_ID_GCHV_USER        0x02      /*  ID DO USER  */
 
@@ -765,7 +656,7 @@ struct sc_rutoken_decipherinfo {
 
 /*
  * EnterSafe stuff
- * 
+ *
  */
 
 #define	SC_ENTERSAFE_MF_DATA	0x01
@@ -800,7 +691,7 @@ typedef struct sc_entersafe_create_data_st {
 			   u8 init_key[16];
 		  } df;
 		  struct {
-			   u8 file_id[2];	
+			   u8 file_id[2];
 			   u8 size[2];
 			   u8 attr[2];
 			   u8 name;
@@ -869,6 +760,7 @@ typedef struct sc_epass2003_gen_key_data_st {
 	 int pukey_id;
 	 size_t key_length;
 	 u8 *modulus;
+	 size_t modulus_len;
 } sc_epass2003_gen_key_data;
 
 
@@ -925,20 +817,20 @@ typedef struct sc_rtecp_genkey_data {
 
 	struct sc_cardctl_myeid_gen_store_key_info {
 		int             op_type;
-		unsigned int	key_type;			/* value of SC_CARDCTL_MYEID_KEY_TYPE */ 
-		size_t    key_len_bits;   
+		unsigned int	key_type;			/* value of SC_CARDCTL_MYEID_KEY_TYPE */
+		size_t    key_len_bits;
 		unsigned char  *mod;
-		size_t    pubexp_len;  
+		size_t    pubexp_len;
 		unsigned char  *pubexp;
-		size_t    primep_len;  
+		size_t    primep_len;
 		unsigned char  *primep;
-		size_t    primeq_len;  
+		size_t    primeq_len;
 		unsigned char  *primeq;
-		size_t    dp1_len;  
+		size_t    dp1_len;
 		unsigned char  *dp1;
-		size_t    dq1_len;  
+		size_t    dq1_len;
 		unsigned char  *dq1;
-		size_t    invq_len;  
+		size_t    invq_len;
 		unsigned char  *invq;
 		/* new for MyEID > 3.6.0 */
 		unsigned char  *d;                  /* EC private key / Symmetric key */
@@ -952,15 +844,16 @@ typedef struct sc_rtecp_genkey_data {
  */
 typedef struct sc_cardctl_piv_genkey_info_st {
 	unsigned int	key_num;
-	unsigned int	key_algid;	/* RSA 5, 6, 7; EC 11, 14 */ 
+	unsigned int	key_algid;	/* RSA 5, 6, 7; EC 11, 14 */
 	unsigned int	key_bits;	/* RSA */
-	unsigned long	exponent;	/* RSA */
+	unsigned char *	exponent;	/* RSA */
+	size_t	exponent_len;	/* RSA */
 	unsigned char *	pubkey;		/* RSA */
-	unsigned int	pubkey_len;	/* RSA */
+	size_t	pubkey_len;	/* RSA */
 	unsigned char * ecparam;        /* EC */
 	unsigned int    ecparam_len;    /* EC */
 	unsigned char * ecpoint;        /* EC */
-	unsigned int    ecpoint_len;    /* EC */
+	size_t    ecpoint_len;    /* EC */
 
 } sc_cardctl_piv_genkey_info_t;
 
@@ -1003,7 +896,7 @@ typedef struct sc_cardctl_openpgp_keygen_info {
 			size_t ecpoint_len;
 			struct sc_object_id oid;
 			u8 oid_len;
-			unsigned int key_length;
+			size_t key_length;
 		} ec;
 	} u;
 } sc_cardctl_openpgp_keygen_info_t;
@@ -1057,6 +950,8 @@ typedef struct sc_cardctl_sc_hsm_init_param {
 	struct sc_aid bio2;			/* AID of biometric server for template 2 */
 	u8 options[2];				/* Initialization options */
 	signed char dkek_shares;	/* Number of DKEK shares, 0 for card generated, -1 for none */
+	signed char num_of_pub_keys;         /* Total number of public keys used for public authentication (if > 0) */
+	u8 required_pub_keys;       /* Number of public keys required for authentication (if public auth. is used) */
 	char *label;				/* Token label to be set in EF.TokenInfo (2F03) */
 } sc_cardctl_sc_hsm_init_param_t;
 
@@ -1074,11 +969,25 @@ typedef struct sc_cardctl_sc_hsm_wrapped_key {
 	size_t wrapped_key_length;	/* Length of key blob */
 } sc_cardctl_sc_hsm_wrapped_key_t;
 
+typedef struct sc_cardctl_sc_hsm_pka_status {
+    u8 num_total;
+    u8 num_missing;
+    u8 num_required;
+    u8 num_authenticated;
+} sc_cardctl_sc_hsm_pka_status_t;
+
+typedef struct sc_cardctl_sc_hsm_pka_register {
+    u8 *buf;
+    size_t buflen;
+    sc_cardctl_sc_hsm_pka_status_t new_status;
+} sc_cardctl_sc_hsm_pka_register_t;
+
 /*
  * isoApplet
  */
 
 #define SC_ISOAPPLET_ALG_REF_RSA_GEN_2048 0xF3
+#define SC_ISOAPPLET_ALG_REF_RSA_GEN_4096 0xF5
 #define SC_ISOAPPLET_ALG_REF_EC_GEN 0xEC
 
 typedef struct sc_cardctl_isoApplet_ec_parameters {

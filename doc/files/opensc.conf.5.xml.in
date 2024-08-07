@@ -74,6 +74,9 @@ app <replaceable>application</replaceable> {
 			specifies one of:
 			<itemizedlist>
 				<listitem><para>
+						<literal><replaceable>filename</replaceable></literal>: Configuration block for the application with specified file path.
+				</para></listitem>
+				<listitem><para>
 						<literal>default</literal>: The fall-back configuration block for all applications
 				</para></listitem>
 				<listitem><para>
@@ -151,7 +154,7 @@ app <replaceable>application</replaceable> {
 				</term>
 				<listitem><para>
 						PKCS#15 initialization/personalization profiles
-						directory for 
+						directory for
 						<citerefentry>
 							<refentrytitle>pkcs15-init</refentrytitle>
 							<manvolnum>1</manvolnum>.
@@ -209,7 +212,7 @@ app <replaceable>application</replaceable> {
 							rep="repeat"><replaceable>name</replaceable></arg>;</option>
 				</term>
 				<listitem><para>
-						Whitelist of card drivers to load at start-up.
+						Allowlist of card drivers to load at start-up.
 						The special value <literal>internal</literal> (the
 						default) will load all statically linked drivers.
 					</para>
@@ -297,6 +300,9 @@ app <replaceable>application</replaceable> {
 									<literal>edo</literal>: See <xref linkend="edo"/>
 							</para></listitem>
 							<listitem><para>
+									<literal>eoi</literal>: See <xref linkend="eoi"/>
+							</para></listitem>
+							<listitem><para>
 									<literal>myeid</literal>: See <xref linkend="myeid"/>
 							</para></listitem>
 							<listitem><para>
@@ -323,6 +329,33 @@ app <replaceable>application</replaceable> {
 						For details see <xref linkend="card_atr"/>.
 					</para>
 				</listitem>
+			</varlistentry>
+			<varlistentry>
+				<term>
+					<option>disable_hw_pkcs1_padding = <replaceable>value</replaceable>;</option>
+				</term>
+				<listitem><para>
+						Disabling PKCS#1 v1.5 padding in HW when card supports doing raw RSA operations.
+						Known parameters:
+						<itemizedlist>
+							<listitem><para>
+									<literal>no</literal>: PKCS#1 v1.5 padding is enabled in HW when card supports it.
+							</para></listitem>
+							<listitem><para>
+									<literal>sign</literal>: PKCS#1 v1.5 padding
+								is disabled only for signatures (PKCS#1 v1.5 type 1).
+							</para></listitem>
+							<listitem><para>
+									<literal>decipher</literal>: PKCS#1 v1.5 padding
+								is disabled only for decryption (PKCS#1 v1.5 type 2).
+							</para></listitem>
+							<listitem><para>
+									<literal>both</literal>: PKCS#1 v1.5 padding
+								is disabled both for signatures and decryption (PKCS#1 v1.5 type 1 and 2).
+							</para></listitem>
+						</itemizedlist>
+						(Default: <literal>decipher</literal>).
+				</para></listitem>
 			</varlistentry>
 			<varlistentry>
 				<term>
@@ -667,6 +700,9 @@ app <replaceable>application</replaceable> {
 							card driver will do everything
 							necessary before sending the data
 							(hash code) to the card.
+					</para><para>
+							PKCS#1 v1.5 padding in HW can be globally disabled by option <literal>disable_hw_pkcs1_padding</literal>.
+							When the global option is used to disable padding, the padding will be disabled even though the MyEID-specific option does not turn it off.
 					</para></listitem>
 				</varlistentry>
 
@@ -769,6 +805,67 @@ app <replaceable>application</replaceable> {
 							possible to set it in any other way.
 					</para></listitem>
 				</varlistentry>
+			</variablelist>
+		</refsect2>
+
+		<refsect2 id="eoi">
+			<title>Configuration Options for Slovenian eID Card</title>
+			<variablelist>
+				<varlistentry>
+					<term>
+						<option>can = <replaceable>value</replaceable>;</option>
+					</term>
+					<listitem><para>
+							CAN (Card Access Number – 6 digit number
+							printed on the right bottom corner of the
+							front side of the document) is required
+							to establish connection with the card.
+							It might be overwritten by <literal>EOI_CAN</literal>
+							environment variable. As CAN is also stored on the card
+							(in encrypted form) it can be used to automatically establish
+							secure connection, but only if the card is accessed over the
+							contact interface.
+					</para></listitem>
+				</varlistentry>
+			</variablelist>
+		</refsect2>
+
+		<refsect2 id="piv">
+			<title>Configuration Options for PIV Card</title>
+			<variablelist>
+				<!-- Commented out until PIV SM is built be default
+				<varlistentry>
+					<term><option>piv_use_sm = <replaceable>name</replaceable>;</option>
+					</term>
+					<listitem><para>
+						Use optional secure messaging as define by NIST SP 800-73-4
+					<replaceable>name</replaceable> is one of:
+					<itemizedlist>
+						<listitem><para><literal>always</literal>
+							- Use secure messaging for commands.
+						</para></listitem>
+						<listitem><para><literal>never</literal>
+							- Used for debugging.  Card may still require use of secure messaging.
+						</para></listitem>
+					</itemizedlist>
+						Ignored if card does not support secure messaging.
+						Default is use secure messaging as required by card issuer
+						policies which are different for contact and contactless.
+						It might be overwritten by <literal>PIV_USE_SM</literal>
+						environment variable.
+					</para></listitem>
+				</varlistentry>
+				<varlistentry>
+					<term><option>piv_pairing_code = <replaceable>num</replaceable>;</option>
+					</term>
+					<listitem><para>
+						Ignored if card does not support piv_pairing_code.
+						Card issuer may require a pairing code be used especially over contactless
+						reader. Not normally used in conf file because pairing code is card specific.
+						Use <literal>PIV_PAIRING_CODE</literal> environment variable.
+					</para></listitem>
+				</varlistentry>
+				-->
 			</variablelist>
 		</refsect2>
 
@@ -1123,13 +1220,45 @@ app <replaceable>application</replaceable> {
 			<variablelist>
 				<varlistentry>
 					<term>
-						<option>use_file_caching = <replaceable>bool</replaceable>;</option>
+						<option>use_file_caching = <replaceable>value</replaceable>;</option>
 					</term>
 					<listitem><para>
 							Whether to cache the card's files (e.g.
 							certificates) on disk in
-							<option>file_cache_dir</option> (Default:
-							<literal>false</literal>).
+							<option>file_cache_dir</option>.
+							Possible parameters:
+							<itemizedlist>
+								<listitem><para>
+									<literal>yes</literal>: Cache all files (public and private).
+								</para></listitem>
+								<listitem><para>
+									<literal>public</literal>: Cache only public files.
+								</para></listitem>
+								<listitem><para>
+									<literal>no</literal>: File caching disabled.
+								</para></listitem>
+							</itemizedlist>
+							(Default: <literal>public</literal>
+							for the following card drivers
+							<literal>atrust-acos</literal>,
+							<literal>belpic</literal>,
+							<literal>cac1</literal>,
+							<literal>cac</literal>,
+							<literal>coolkey</literal>,
+							<literal>dnie</literal>,
+							<literal>edo</literal>,
+							<literal>esteid2018</literal>,
+							<literal>flex</literal>,
+							<literal>cyberflex</literal>,
+							<literal>gemsafeV1</literal>,
+							<literal>idprime</literal>,
+							<literal>itacns</literal>,
+							<literal>jpki</literal>,
+							<literal>MaskTech</literal>,
+							<literal>mcrd</literal>,
+							<literal>npa</literal>,
+							<literal>nqapplet</literal>,
+							<literal>tcos</literal> and otherwise <literal>no</literal>).
 						</para>
 						<para>
 							If caching is done by a system process, the
@@ -1173,6 +1302,16 @@ app <replaceable>application</replaceable> {
 							cached information. Note that the cached files
 							may contain personal data such as name and mail
 							address.
+						</para>
+						<para>
+                            The PIV-II card driver supports the history object's
+                            list of retired keys and certificates if they are
+							readable in the file cache directory.
+							If the specified object's URL is
+							<literal>"http://"</literal><replaceable>DNS name</replaceable><literal>"/"</literal><replaceable>ASCII-HEX OffCardKeyHistoryFile</replaceable>,
+							then the searches for the file name
+							<replaceable>OffCardKeyHistoryFile</replaceable>
+							in the cache directory.
 					</para></listitem>
 				</varlistentry>
 				<varlistentry>
@@ -1269,12 +1408,13 @@ app <replaceable>application</replaceable> {
 					</term>
 					<listitem><para>
 							List of the builtin pkcs15 emulators to test
-							(Default: <literal>westcos, openpgp, 
-								starcert, tcos, esteid, itacns, 
-								PIV-II, cac, gemsafeGPK, gemsafeV1, actalis,
-								atrust-acos, tccardos, entersafe, pteid,
-								oberthur, sc-hsm, dnie, gids, iasecc, jpki,
-								coolkey, din66291</literal>)
+							(Default: <literal>internal</literal>)
+						</para>
+						<para>
+							Special value of <literal>internal</literal> will try all not disabled builtin pkcs15 emulators.
+						</para>
+						<para>
+							Special value of <literal>old</literal> will try all disabled pkcs15 emulators.
 					</para></listitem>
 				</varlistentry>
 				<varlistentry>
@@ -1383,6 +1523,22 @@ app <replaceable>application</replaceable> {
 										<literal>false</literal>)
 								</para></listitem>
 							</varlistentry>
+							<varlistentry>
+								<term>
+									<option>user_pin = <replaceable>name</replaceable>;</option>
+								</term>
+								<listitem><para>
+									Name of the User PIN object that will be used as the main PIN.
+								</para></listitem>
+							</varlistentry>
+							<varlistentry>
+								<term>
+									<option>sign_pin = <replaceable>name</replaceable>;</option>
+								</term>
+								<listitem><para>
+									Name of the PIN object that will be used for signing.
+								</para></listitem>
+							</varlistentry>
 						</variablelist>
 					</listitem>
 				</varlistentry>
@@ -1424,10 +1580,13 @@ app <replaceable>application</replaceable> {
 						<option>slots_per_card = <replaceable>num</replaceable>;</option>
 					</term>
 					<listitem><para>
-							Maximum number of slots per smart card (Default:
-							<literal>4</literal>).  If the card has fewer keys
+							Maximum number of PIN slots per smart card (Default:
+							<literal>4</literal>).  If the card has fewer PINs
 							than defined here, the remaining number of slots
-							will be empty.
+                            will be empty. For Firefox, Chrome and Chromium, the
+							<option>slots_per_card</option> is set to <literal>1</literal>,
+							to avoid prompting for unrelated PINs.  Typically, this
+							effectively disables signature PINs and keys.
 					</para></listitem>
 				</varlistentry>
 				<varlistentry>
@@ -1688,6 +1847,17 @@ app <replaceable>application</replaceable> {
 						<application>piv-tool</application>.
 				</para></listitem>
 			</varlistentry>
+			<varlistentry>
+				<term>
+					<envar>PIV_USE_SM</envar>,
+					<envar>PIV_PAIRING_CODE</envar>
+				</term>
+				<listitem><para>
+						PIV configuration during initialization
+						See Configuration Options for PIV Card.
+				</para></listitem>
+			</varlistentry>
+
 		</variablelist>
 	</refsect1>
 

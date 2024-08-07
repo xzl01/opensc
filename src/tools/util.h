@@ -36,9 +36,20 @@ extern "C" {
 # define NORETURN
 #endif
 
-void util_print_binary(FILE *f, const u8 *buf, int count);
-void util_hex_dump(FILE *f, const u8 *in, int len, const char *sep);
+#ifdef _MSC_VER
+# ifndef _SSIZE_T_DEFINED
+#  undef ssize_t
+#  include <BaseTsd.h>
+   typedef _W64 SSIZE_T ssize_t;
+#  define _SSIZE_T_DEFINED
+# endif /* _SSIZE_T_DEFINED */
+#endif /* _MSC_VER */
+
+void util_print_binary(FILE *f, const u8 *buf, size_t count);
+void util_hex_dump(FILE *f, const u8 *in, size_t len, const char *sep);
 void util_hex_dump_asc(FILE *f, const u8 *in, size_t count, int addr);
+void util_print_usage(const char *app_name, const struct option options[],
+	const char *option_help[], const char *args);
 NORETURN void util_print_usage_and_die(const char *app_name, const struct option options[],
 	const char *option_help[], const char *args);
 int util_list_card_drivers(const sc_context_t *ctx);
@@ -47,10 +58,10 @@ void util_warn(const char *fmt, ...);
 void util_error(const char *fmt, ...);
 NORETURN void util_fatal(const char *fmt, ...);
 
-int util_connect_reader (sc_context_t *ctx, sc_reader_t **reader, const char *reader_id, int do_wait, int verbose);
+int util_connect_reader (sc_context_t *ctx, sc_reader_t **reader, const char *reader_id, int do_wait);
 /* All singing all dancing card connect routine */
-int util_connect_card_ex(struct sc_context *, struct sc_card **, const char *reader_id, int do_wait, int do_lock, int verbose);
-int util_connect_card(struct sc_context *, struct sc_card **, const char *reader_id, int do_wait, int verbose);
+int util_connect_card_ex(struct sc_context *, struct sc_card **, const char *reader_id, int do_wait, int do_lock);
+int util_connect_card(struct sc_context *, struct sc_card **, const char *reader_id, int do_wait);
 
 int util_getpass (char **lineptr, size_t *n, FILE *stream);
 

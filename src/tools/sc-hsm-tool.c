@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2001  Juha Yrjölä <juha.yrjola@iki.fi>
  * Copyright (C) 2012 www.CardContact.de, Andreas Schwier, Minden, Germany
+ * Copyright (C) 2018-2019 GSMK - Gesellschaft für Sichere Mobile Kommunikation mbH
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -41,6 +42,7 @@
 #include <openssl/rand.h>
 #include <openssl/err.h>
 
+#include "fread_to_eof.h"
 #include "libopensc/sc-ossl-compat.h"
 #include "libopensc/opensc.h"
 #include "libopensc/cardctl.h"
@@ -79,6 +81,7 @@ enum {
 	OPT_PASSWORD_SHARES_TOTAL
 };
 
+// clang-format off
 static const struct option options[] = {
 	{ "initialize",				0, NULL,		'X' },
 	{ "create-dkek-share",		1, NULL,		'C' },
@@ -88,6 +91,11 @@ static const struct option options[] = {
 #endif
 	{ "wrap-key",				1, NULL,		'W' },
 	{ "unwrap-key",				1, NULL,		'U' },
+	{ "public-key-auth",		1, NULL,		'K' },
+	{ "required-pub-keys",		1, NULL,		'n' },
+	{ "export-for-pub-key-auth",1, NULL,		'e' },
+	{ "register-public-key",	1, NULL,		'g' },
+	{ "public-key-auth-status",	0, NULL,		'S' },
 	{ "dkek-shares",			1, NULL,		's' },
 	{ "so-pin",					1, NULL,		OPT_SO_PIN },
 	{ "pin",					1, NULL,		OPT_PIN },
@@ -105,6 +113,7 @@ static const struct option options[] = {
 	{ "verbose",				0, NULL,		'v' },
 	{ NULL, 0, NULL, 0 }
 };
+// clang-format on
 
 static const char *option_help[] = {
 	"Initialize token",
@@ -115,6 +124,11 @@ static const char *option_help[] = {
 #endif
 	"Wrap key and save to <filename>",
 	"Unwrap key read from <filename>",
+	"Use public key authentication, set total number of public keys",
+	"Number of public keys required for authentication [1]",
+	"Export key for public key authentication",
+	"Register public key for public key authentication (PKA file)",
+	"Show status of public key authentication",
 	"Number of DKEK shares [No DKEK]",
 	"Define security officer PIN (SO-PIN)",
 	"Define user PIN",
@@ -124,12 +138,12 @@ static const char *option_help[] = {
 	"Define password for DKEK share",
 	"Define threshold for number of password shares required for reconstruction",
 	"Define number of password shares",
-	"Key reference for key wrap/unwrap",
+	"Key reference for key wrap/unwrap/export",
 	"Token label for --initialize",
 	"Force replacement of key and certificate",
 	"Uses reader number <arg> [0]",
 	"Wait for a card to be inserted",
-	"Verbose operation. Use several times to enable debug output.",
+	"Verbose operation, may be used several times",
 };
 
 typedef struct {
@@ -561,12 +575,25 @@ static void print_info(sc_card_t *card, sc_file_t *file)
 
 
 
-static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin, int retry_counter, const char *bio1, const char *bio2, int dkek_shares, const char *label)
+static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin, int retry_counter, const char *bio1, const char *bio2, int dkek_shares, signed char num_of_pub_keys, u8 required_pub_keys, const char *label)
 {
 	sc_cardctl_sc_hsm_init_param_t param;
 	size_t len;
 	char *_so_pin = NULL, *_user_pin = NULL;
 	int r;
+
+	if (num_of_pub_keys != -1 && (num_of_pub_keys < 1 || num_of_pub_keys > 90)) {
+		fprintf(stderr, "Total number of public keys for authentication must be between 1 and 90\n");
+		return -1;
+	}
+	if (required_pub_keys < 1 || required_pub_keys > 90) {
+		fprintf(stderr, "Number of public keys required for authentication must be between 1 and 90\n");
+		return -1;
+	}
+	if (num_of_pub_keys != -1 && required_pub_keys > num_of_pub_keys) {
+		fprintf(stderr, "Required public keys must be <= total number of public keys\n");
+		return -1;
+	}
 
 	if (so_pin == NULL) {
 		printf("Enter SO-PIN (16 hexadecimal characters) : ");
@@ -655,6 +682,8 @@ static int initialize(sc_card_t *card, const char *so_pin, const char *user_pin,
 	}
 
 	param.dkek_shares = (char)dkek_shares;
+	param.num_of_pub_keys = (signed char)num_of_pub_keys; /* guaranteed in [-1,90] */
+	param.required_pub_keys = (u8)required_pub_keys; /* guaranteed in [1,90] */
 	param.label = (char *)label;
 
 	r = sc_card_ctl(card, SC_CARDCTL_SC_HSM_INITIALIZE, (void *)&param);
@@ -708,7 +737,7 @@ static int recreate_password_from_shares(char **pwd, int *pwdlen, int num_of_pas
 	}
 	binlen = 64;
 	sc_hex_to_bin(inbuf, bin, &binlen);
-	BN_bin2bn(bin, binlen, prime);
+	BN_bin2bn(bin, (int)binlen, prime);
 
 	sp = shares;
 	for (i = 0; i < num_of_password_shares; i++) {
@@ -743,7 +772,7 @@ static int recreate_password_from_shares(char **pwd, int *pwdlen, int num_of_pas
 		}
 		binlen = 64;
 		sc_hex_to_bin(inbuf, bin, &binlen);
-		BN_bin2bn(bin, binlen, (sp->y));
+		BN_bin2bn(bin, (int)binlen, (sp->y));
 
 		sp++;
 	}
@@ -817,7 +846,7 @@ static int import_dkek_share(sc_card_t *card, const char *inf, int iter, const c
 		if (num_of_password_shares == -1) {
 			printf("Enter password to decrypt DKEK share : ");
 			util_getpass(&pwd, NULL, stdin);
-			pwdlen = strlen(pwd);
+			pwdlen = (int)strlen(pwd);
 			printf("\n");
 		} else {
 			r = recreate_password_from_shares(&pwd, &pwdlen, num_of_password_shares);
@@ -828,7 +857,7 @@ static int import_dkek_share(sc_card_t *card, const char *inf, int iter, const c
 
 	} else {
 		pwd = (char *) password;
-		pwdlen = strlen(password);
+		pwdlen = (int)strlen(password);
 	}
 
 	printf("Deciphering DKEK share, please wait...\n");
@@ -878,7 +907,7 @@ static int import_dkek_share(sc_card_t *card, const char *inf, int iter, const c
 
 static int print_dkek_share(sc_card_t *card, const char *inf, int iter, const char *password, int num_of_password_shares)
 {
-	// hex output can be used in the SCSH shell with the 
+	// hex output can be used in the SCSH shell with the
 	// decrypt_keyblob.js file
 	sc_cardctl_sc_hsm_dkek_t dkekinfo;
 	EVP_CIPHER_CTX *bn_ctx = NULL;
@@ -918,7 +947,7 @@ static int print_dkek_share(sc_card_t *card, const char *inf, int iter, const ch
 		if (num_of_password_shares == -1) {
 			printf("Enter password to decrypt DKEK share : ");
 			util_getpass(&pwd, NULL, stdin);
-			pwdlen = strlen(pwd);
+			pwdlen = (int)strlen(pwd);
 			printf("\n");
 		} else {
 			r = recreate_password_from_shares(&pwd, &pwdlen, num_of_password_shares);
@@ -929,7 +958,7 @@ static int print_dkek_share(sc_card_t *card, const char *inf, int iter, const ch
 
 	} else {
 		pwd = (char *) password;
-		pwdlen = strlen(password);
+		pwdlen = (int)strlen(password);
 	}
 
 	printf("Deciphering DKEK share, please wait...\n");
@@ -1010,7 +1039,7 @@ static void ask_for_password(char **pwd, int *pwdlen)
 			printf("Passwords do not match. Please retry.\n");
 			continue;
 		}
-		*pwdlen = strlen(*pwd);
+		*pwdlen = (int)strlen(*pwd);
 		break;
 	}
 
@@ -1179,7 +1208,7 @@ static int create_dkek_share(sc_card_t *card, const char *outf, int iter, const 
 
 	} else {
 		pwd = (char *) password;
-		pwdlen = strlen(password);
+		pwdlen = (int)strlen(password);
 	}
 
 	if (r < 0) {
@@ -1375,7 +1404,7 @@ static int wrap_key(sc_context_t *ctx, sc_card_t *card, int keyid, const char *o
 			fprintf(stderr, "Error reading PRKD file %s. Skipping.\n", sc_strerror(ef_prkd_len));
 			ef_prkd_len = 0;
 		} else {
-			ef_prkd_len = determineLength(ef_prkd, ef_prkd_len);
+			ef_prkd_len = (int)determineLength(ef_prkd, ef_prkd_len);
 		}
 	}
 
@@ -1394,7 +1423,7 @@ static int wrap_key(sc_context_t *ctx, sc_card_t *card, int keyid, const char *o
 			fprintf(stderr, "Error reading certificate %s. Skipping\n", sc_strerror(ef_cert_len));
 			ef_cert_len = 0;
 		} else {
-			ef_cert_len = determineLength(ef_cert, ef_cert_len);
+			ef_cert_len = (int)determineLength(ef_cert, ef_cert_len);
 		}
 	}
 
@@ -1501,8 +1530,10 @@ static int unwrap_key(sc_card_t *card, int keyid, const char *inf, const char *p
 	u8 fid[2];
 	char *lpin = NULL;
 	unsigned int cla, tag;
-	int r, keybloblen;
+	int r;
+	size_t keybloblen;
 	size_t len, olen, prkd_len, cert_len;
+	ssize_t sz;
 
 	if ((keyid < 1) || (keyid > 255)) {
 		fprintf(stderr, "Invalid key reference (must be 0 < keyid <= 255)\n");
@@ -1521,12 +1552,13 @@ static int unwrap_key(sc_card_t *card, int keyid, const char *inf, const char *p
 		return -1;
 	}
 
-	keybloblen = fread(keyblob, 1, sizeof(keyblob), in);
+	sz = fread(keyblob, 1, sizeof(keyblob), in);
 	fclose(in);
-	if (keybloblen < 0) {
+	if (sz < 0) {
 		perror(inf);
 		return -1;
 	}
+	keybloblen = sz;
 
 	ptr = keyblob;
 	if ((sc_asn1_read_tag(&ptr, keybloblen, &cla, &tag, &len) != SC_SUCCESS)
@@ -1667,6 +1699,190 @@ static int unwrap_key(sc_card_t *card, int keyid, const char *inf, const char *p
 }
 
 
+static int export_key(sc_card_t *card, int keyid, const char *outf)
+{
+	sc_path_t path;
+	FILE *outfp = NULL;
+	u8 fid[2];
+	u8 ef_cert[MAX_CERT];
+	u8 dev_aut_cert[MAX_CERT];
+	u8 dica[MAX_CERT];
+	u8 tag = SC_ASN1_TAG_CONSTRUCTED | SC_ASN1_TAG_SEQUENCE; /* 0x30 */
+	int r = 0, ef_cert_len, total_certs_len;
+	size_t dev_aut_cert_len, dica_len;
+	u8 *data = NULL, *out = NULL, *ptr;
+	size_t datalen, outlen;
+
+	if ((keyid < 1) || (keyid > 255)) {
+		fprintf(stderr, "Invalid key reference (must be 0 < keyid <= 255)\n");
+		return -1;
+	}
+
+	fid[0] = EE_CERTIFICATE_PREFIX;
+	fid[1] = (unsigned char)keyid;
+	ef_cert_len = 0;
+
+	/* Try to select a related EF containing the certificate for the key */
+	sc_path_set(&path, SC_PATH_TYPE_FILE_ID, fid, sizeof(fid), 0, 0);
+	r = sc_select_file(card, &path, NULL);
+	if (r != SC_SUCCESS) {
+		fprintf(stderr, "Wrong key reference (-i %d)? Failed to select file: %s\n", keyid, sc_strerror(r));
+		return -1;
+	}
+
+	ef_cert_len = sc_read_binary(card, 0, ef_cert, sizeof(ef_cert), 0);
+	if (ef_cert_len < 0) {
+		fprintf(stderr, "Error reading certificate %s. Skipping\n", sc_strerror(ef_cert_len));
+		ef_cert_len = 0;
+	} else {
+		ef_cert_len = (int)determineLength(ef_cert, ef_cert_len);
+	}
+
+	/* C_DevAut */
+	fid[0] = 0x2F;
+	fid[1] = 0x02;
+	dev_aut_cert_len = 0;
+
+	/* Read concatenation of both certificates */
+	sc_path_set(&path, SC_PATH_TYPE_FILE_ID, fid, sizeof(fid), 0, 0);
+	r = sc_select_file(card, &path, NULL);
+	if (r != SC_SUCCESS) {
+		fprintf(stderr, "Failed to select certificates: %s\n", sc_strerror(r));
+		return -1;
+	}
+
+	total_certs_len = sc_read_binary(card, 0, dev_aut_cert, sizeof(dev_aut_cert), 0);
+	if (total_certs_len < 0) {
+		fprintf(stderr, "Error reading certificate: %s\n", sc_strerror(total_certs_len));
+		return -1;
+	} else {
+		dev_aut_cert_len = determineLength(dev_aut_cert, total_certs_len);
+		dica_len = total_certs_len - dev_aut_cert_len;
+		memcpy(dica, dev_aut_cert + dev_aut_cert_len, dica_len);
+	}
+	if (dica_len == 0) {
+		fprintf(stderr, "Could not determine device issuer certificate\n");
+		return -1;
+	}
+
+	if ((outfp = fopen(outf, "r"))) {
+		fprintf(stderr, "Output file '%s' already exists\n", outf);
+		fclose(outfp);
+		return -1;
+	}
+	fprintf(stderr, "Warning: Device certificate chain not verified!\n");
+
+	datalen = ef_cert_len + dev_aut_cert_len + dica_len;
+	outlen = 8 + datalen;
+	if (!(data = malloc(datalen))) {
+		fprintf(stderr, "Malloc failed\n");
+		r = -1;
+		goto err;
+	}
+	if (!(out = malloc(outlen))) {
+		fprintf(stderr, "Malloc failed\n");
+		r = -1;
+		goto err;
+	}
+	memcpy(data, ef_cert, ef_cert_len);
+	memcpy(data + ef_cert_len, dev_aut_cert, dev_aut_cert_len);
+	memcpy(data + ef_cert_len + dev_aut_cert_len, dica, dica_len);
+
+	if ((r = sc_asn1_put_tag(tag, data, datalen, out, outlen, &ptr)) < 0) {
+		fprintf(stderr, "Error formatting ASN1 sequence: %s\n", sc_strerror(r));
+		r = -1;
+		goto err;
+	}
+	outlen = ptr - out;
+
+	if (!(outfp = fopen(outf, "wb"))) {
+		perror(outf);
+		r = -1;
+		goto err;
+	}
+
+	if (fwrite(out, 1, outlen, outfp) != (size_t)outlen) {
+		perror(outf);
+		r = -1;
+		goto err;
+	}
+
+err:
+	if (outfp)
+		fclose(outfp);
+	if (out)
+		free(out);
+	if (data)
+		free(data);
+
+	return r;
+}
+
+static void print_pka_status(const sc_cardctl_sc_hsm_pka_status_t *status)
+{
+	printf("Number of public keys:     %d\n", status->num_total);
+	printf("Missing public keys:       %d\n", status->num_missing);
+	printf("Required pubkeys for auth: %d\n", status->num_required);
+	printf("Authenticated public keys: %d\n", status->num_authenticated);
+}
+
+static int register_public_key(sc_context_t *ctx, sc_card_t *card, const char *inf)
+{
+	int r = 0;
+	sc_cardctl_sc_hsm_pka_register_t pka_register;
+
+	memset(&pka_register, 0, sizeof(pka_register));
+
+	if (!fread_to_eof(inf, &pka_register.buf, &pka_register.buflen)) {
+		r = -1;
+		goto err;
+	}
+
+	r = sc_card_ctl(card, SC_CARDCTL_SC_HSM_REGISTER_PUBLIC_KEY, &pka_register);
+	if (r == SC_ERROR_INS_NOT_SUPPORTED) { /* Not supported or not initialized for public key registration */
+		fprintf(stderr, "Card not initialized for public key registration\n");
+		r = -1;
+		goto err;
+	}
+	if (r < 0) {
+		fprintf(stderr, "sc_card_ctl(*, SC_CARDCTL_SC_HSM_REGISTER_PUBLIC_KEY, *) failed with %s\n", sc_strerror(r));
+		r = -1;
+		goto err;
+	}
+
+	print_pka_status(&pka_register.new_status);
+
+	r = 0;
+	/* fall-through */
+
+err:
+	free(pka_register.buf);
+	pka_register.buf = NULL;
+	return r;
+}
+
+
+
+static int public_key_auth_status(sc_context_t *ctx, sc_card_t *card)
+{
+	int r;
+	sc_cardctl_sc_hsm_pka_status_t status;
+
+	r = sc_card_ctl(card, SC_CARDCTL_SC_HSM_PUBLIC_KEY_AUTH_STATUS, &status);
+	if (r == SC_ERROR_INS_NOT_SUPPORTED) { /* Not supported or not initialized for public key registration */
+		fprintf(stderr, "Card not initialized for public key registration\n");
+		return -1;
+	}
+	if (r < 0) {
+		fprintf(stderr, "sc_card_ctl(*, SC_CARDCTL_SC_HSM_PUBLIC_KEY_AUTH_STATUS, *) failed with %s\n", sc_strerror(r));
+		return -1;
+	}
+
+	print_pka_status(&status);
+
+	return 0;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -1678,6 +1894,9 @@ int main(int argc, char *argv[])
 	int do_create_dkek_share = 0;
 	int do_wrap_key = 0;
 	int do_unwrap_key = 0;
+	int do_export_key = 0;
+	int do_register_public_key = 0;
+	int do_public_key_auth_status = 0;
 	sc_path_t path;
 	sc_file_t *file = NULL;
 	const char *opt_so_pin = NULL;
@@ -1687,6 +1906,8 @@ int main(int argc, char *argv[])
 	const char *opt_bio1 = NULL;
 	const char *opt_bio2 = NULL;
 	int opt_retry_counter = 3;
+	int opt_num_of_pub_keys = -1;
+	int opt_required_pub_keys = 1;
 	int opt_dkek_shares = -1;
 	int opt_key_reference = -1;
 	int opt_password_shares_threshold = -1;
@@ -1698,7 +1919,7 @@ int main(int argc, char *argv[])
 	sc_card_t *card = NULL;
 
 	while (1) {
-		c = getopt_long(argc, argv, "XC:I:P:W:U:s:i:fr:wv", options, &long_optind);
+		c = getopt_long(argc, argv, "XC:I:P:W:U:K:n:e:g:Ss:i:fr:wv", options, &long_optind);
 		if (c == -1)
 			break;
 		if (c == '?')
@@ -1733,6 +1954,26 @@ int main(int argc, char *argv[])
 			opt_filename = optarg;
 			action_count++;
 			break;
+		case 'K':
+			opt_num_of_pub_keys = (int)atol(optarg);
+			break;
+		case 'n':
+			opt_required_pub_keys = (int)atol(optarg);
+			break;
+		case 'e':
+			do_export_key = 1;
+			opt_filename = optarg;
+			action_count++;
+			break;
+		case 'g':
+			do_register_public_key = 1;
+			opt_filename = optarg;
+			action_count++;
+			break;
+		case 'S':
+			do_public_key_auth_status = 1;
+			action_count++;
+			break;
 		case OPT_PASSWORD:
 			util_get_pin(optarg, &opt_password);
 			break;
@@ -1743,7 +1984,7 @@ int main(int argc, char *argv[])
 			util_get_pin(optarg, &opt_pin);
 			break;
 		case OPT_RETRY:
-			opt_retry_counter = atol(optarg);
+			opt_retry_counter = (int)atol(optarg);
 			break;
 		case OPT_BIO1:
 			opt_bio1 = optarg;
@@ -1752,19 +1993,19 @@ int main(int argc, char *argv[])
 			opt_bio2 = optarg;
 			break;
 		case OPT_PASSWORD_SHARES_THRESHOLD:
-			opt_password_shares_threshold = atol(optarg);
+			opt_password_shares_threshold = (int)atol(optarg);
 			break;
 		case OPT_PASSWORD_SHARES_TOTAL:
-			opt_password_shares_total = atol(optarg);
+			opt_password_shares_total = (int)atol(optarg);
 			break;
 		case 's':
-			opt_dkek_shares = atol(optarg);
+			opt_dkek_shares = (int)atol(optarg);
 			break;
 		case 'f':
 			opt_force = 1;
 			break;
 		case 'i':
-			opt_key_reference = atol(optarg);
+			opt_key_reference = (int)atol(optarg);
 			break;
 		case 'r':
 			opt_reader = optarg;
@@ -1781,19 +2022,72 @@ int main(int argc, char *argv[])
 		}
 	}
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L || (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER >= 0x20700000L)
-	OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
-		| OPENSSL_INIT_ADD_ALL_CIPHERS
-		| OPENSSL_INIT_ADD_ALL_DIGESTS,
-		NULL);
-#else
-	CRYPTO_malloc_init();
-	ERR_load_crypto_strings();
-	OpenSSL_add_all_algorithms();
-#endif
+	if (!do_initialize && opt_num_of_pub_keys != -1) {
+		fprintf(stderr, "Option -K (--public-key-auth) requires option -X\n");
+		exit(1);
+	}
+	if (!do_initialize && opt_required_pub_keys != 1) {
+		fprintf(stderr, "Option -n (--required-pub-keys) requires option -X\n");
+		exit(1);
+	}
+	if (do_initialize && do_export_key) {
+		fprintf(stderr, "Option -e (--export-for-pub-key-auth) excludes option -X\n");
+		exit(1);
+	}
+	if (do_wrap_key && do_export_key) {
+		fprintf(stderr, "Option -e (--export-for-pub-key-auth) excludes option -W\n");
+		exit(1);
+	}
+	if (do_unwrap_key && do_export_key) {
+		fprintf(stderr, "Option -e (--export-for-pub-key-auth) excludes option -U\n");
+		exit(1);
+	}
+	if (do_export_key && opt_key_reference == -1) {
+		fprintf(stderr, "Option -e (--export-for-pub-key-auth) requires option -i\n");
+		exit(1);
+	}
+	if (do_initialize && do_register_public_key) {
+		fprintf(stderr, "Option -g (--register-public-key) excludes option -X\n");
+		exit(1);
+	}
+	if (do_wrap_key && do_register_public_key) {
+		fprintf(stderr, "Option -g (--register-public-key) excludes option -W\n");
+		exit(1);
+	}
+	if (do_unwrap_key && do_register_public_key) {
+		fprintf(stderr, "Option -g (--register-public-key) excludes option -U\n");
+		exit(1);
+	}
+	if (do_export_key && do_register_public_key) {
+		fprintf(stderr, "Option -g (--register-public-key) excludes option -e\n");
+		exit(1);
+	}
+	if (do_initialize && do_public_key_auth_status) {
+		fprintf(stderr, "Option -S (--public-key-auth-status) excludes option -X\n");
+		exit(1);
+	}
+	if (do_wrap_key && do_public_key_auth_status) {
+		fprintf(stderr, "Option -S (--public-key-auth-status) excludes option -W\n");
+		exit(1);
+	}
+	if (do_unwrap_key && do_public_key_auth_status) {
+		fprintf(stderr, "Option -S (--public-key-auth-status) excludes option -U\n");
+		exit(1);
+	}
+	if (do_export_key && do_public_key_auth_status) {
+		fprintf(stderr, "Option -S (--public-key-auth-status) excludes option -e\n");
+		exit(1);
+	}
+	if (do_register_public_key && do_public_key_auth_status) {
+		fprintf(stderr, "Option -S (--public-key-auth-status) excludes option -g\n");
+		exit(1);
+	}
 
 	memset(&ctx_param, 0, sizeof(sc_context_param_t));
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r != SC_SUCCESS) {
@@ -1801,7 +2095,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	r = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0, verbose);
+	r = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0);
 	if (r != SC_SUCCESS) {
 		if (r < 0) {
 			fprintf(stderr, "Failed to connect to card: %s\n", sc_strerror(err));
@@ -1817,7 +2111,7 @@ int main(int argc, char *argv[])
 		goto fail;
 	}
 
-	if (do_initialize && initialize(card, opt_so_pin, opt_pin, opt_retry_counter, opt_bio1, opt_bio2, opt_dkek_shares, opt_label))
+	if (do_initialize && initialize(card, opt_so_pin, opt_pin, opt_retry_counter, opt_bio1, opt_bio2, opt_dkek_shares, opt_num_of_pub_keys, opt_required_pub_keys, opt_label))
 		goto fail;
 
 	if (do_create_dkek_share && create_dkek_share(card, opt_filename, opt_iter, opt_password, opt_password_shares_threshold, opt_password_shares_total))
@@ -1833,6 +2127,15 @@ int main(int argc, char *argv[])
 		goto fail;
 
 	if (do_unwrap_key && unwrap_key(card, opt_key_reference, opt_filename, opt_pin, opt_force))
+		goto fail;
+
+	if (do_export_key && export_key(card, opt_key_reference, opt_filename))
+		goto fail;
+
+	if (do_register_public_key && register_public_key(ctx, card, opt_filename))
+		goto fail;
+
+	if (do_public_key_auth_status && public_key_auth_status(ctx, card))
 		goto fail;
 
 	if (action_count == 0) {

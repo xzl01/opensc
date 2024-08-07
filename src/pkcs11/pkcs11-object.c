@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -31,7 +31,7 @@ static void sc_find_release(sc_pkcs11_operation_t *operation);
 static sc_pkcs11_mechanism_type_t find_mechanism = {
 	0,		/* mech */
 	{0,0,0},	/* mech_info */
-	0,		/* key_type */
+	{ -1 },		/* key_types */
 	sizeof(struct sc_pkcs11_find_operation),	/* obj_size */
 	sc_find_release,				/* release */
 	NULL,		/* md_init */
@@ -46,11 +46,18 @@ static sc_pkcs11_mechanism_type_t find_mechanism = {
 	NULL,		/* verif_final */
 	NULL,		/* decrypt_init */
 	NULL,		/* decrypt */
+	NULL,		/* decrypt_update */
+	NULL,		/* decrypt_final */
 	NULL,		/* derive */
 	NULL,		/* wrap */
 	NULL,		/* unwrap */
+	NULL,		/* encrypt init */
+	NULL,		/* encrypt */
+	NULL,		/* ecnrypt_update */
+	NULL,		/* encrypt_final */
 	NULL,		/* mech_data */
 	NULL,		/* free_mech_data */
+	NULL,		/* copy_mech_data */
 };
 
 static void
@@ -145,7 +152,6 @@ out:
 	return rv;
 }
 
-
 CK_RV
 C_CreateObject(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		CK_ATTRIBUTE_PTR pTemplate,	/* the object's template */
@@ -239,6 +245,7 @@ C_GetAttributeValue(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	CK_RV res;
 	CK_RV res_type;
 	unsigned int i;
+	const char *name;
 
 	if (pTemplate == NULL_PTR || ulCount == 0)
 		return CKR_ARGUMENTS_BAD;
@@ -281,8 +288,15 @@ C_GetAttributeValue(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		}
 	}
 
-out:	sc_log(context, "C_GetAttributeValue(hSession=0x%lx, hObject=0x%lx) = %s",
-			hSession, hObject, lookup_enum ( RV_T, rv ));
+out:
+	name = lookup_enum (RV_T, rv );
+	if (name)
+		sc_log(context, "C_GetAttributeValue(hSession=0x%lx, hObject=0x%lx) = %s",
+			hSession, hObject, name);
+	else
+		sc_log(context, "C_GetAttributeValue(hSession=0x%lx, hObject=0x%lx) = 0x%lx",
+                        hSession, hObject, rv);
+
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -531,7 +545,7 @@ C_DigestInit(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	if (rv == CKR_OK)
 		rv = sc_pkcs11_md_init(session, pMechanism);
 
-	sc_log(context, "C_DigestInit() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_DigestInit() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -576,7 +590,7 @@ C_Digest(CK_SESSION_HANDLE hSession,		/* the session's handle */
 		rv = sc_pkcs11_md_final(session, pDigest, pulDigestLen);
 
 out:
-	sc_log(context, "C_Digest() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_Digest = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -598,7 +612,7 @@ C_DigestUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	if (rv == CKR_OK)
 		rv = sc_pkcs11_md_update(session, pPart, ulPartLen);
 
-	sc_log(context, "C_DigestUpdate() == %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_DigestUpdate() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -628,7 +642,7 @@ C_DigestFinal(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	if (rv == CKR_OK)
 		rv = sc_pkcs11_md_final(session, pDigest, pulDigestLen);
 
-	sc_log(context, "C_DigestFinal() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_DigestFinal() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -680,7 +694,7 @@ C_SignInit(CK_SESSION_HANDLE hSession,		/* the session's handle */
 	rv = sc_pkcs11_sign_init(session, pMechanism, object, key_type);
 
 out:
-	sc_log(context, "C_SignInit() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_SignInit() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -728,7 +742,7 @@ C_Sign(CK_SESSION_HANDLE hSession,		/* the session's handle */
 	}
 
 out:
-	sc_log(context, "C_Sign() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_Sign() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -750,7 +764,7 @@ C_SignUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	if (rv == CKR_OK)
 		rv = sc_pkcs11_sign_update(session, pPart, ulPartLen);
 
-	sc_log(context, "C_SignUpdate() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_SignUpdate() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -792,7 +806,7 @@ C_SignFinal(CK_SESSION_HANDLE hSession,		/* the session's handle */
 	}
 
 out:
-	sc_log(context, "C_SignFinal() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_SignFinal() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
@@ -823,7 +837,48 @@ C_EncryptInit(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		CK_MECHANISM_PTR pMechanism,	/* the encryption mechanism */
 		CK_OBJECT_HANDLE hKey)		/* handle of encryption key */
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	CK_BBOOL can_encrypt;
+	CK_KEY_TYPE key_type;
+	CK_ATTRIBUTE encrypt_attribute = {CKA_ENCRYPT, &can_encrypt, sizeof(can_encrypt)};
+	CK_ATTRIBUTE key_type_attr = {CKA_KEY_TYPE, &key_type, sizeof(key_type)};
+	struct sc_pkcs11_session *session;
+	struct sc_pkcs11_object *object;
+	CK_RV rv;
+
+	if (pMechanism == NULL_PTR)
+		return CKR_ARGUMENTS_BAD;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_object_from_session(hSession, hKey, &session, &object);
+	if (rv != CKR_OK) {
+		if (rv == CKR_OBJECT_HANDLE_INVALID)
+			rv = CKR_KEY_HANDLE_INVALID;
+		goto out;
+	}
+
+	if (object->ops->encrypt == NULL_PTR) {
+		rv = CKR_KEY_TYPE_INCONSISTENT;
+		goto out;
+	}
+
+	rv = object->ops->get_attribute(session, object, &encrypt_attribute);
+	if (rv != CKR_OK || !can_encrypt) {
+		rv = CKR_KEY_TYPE_INCONSISTENT;
+		goto out;
+	}
+	rv = object->ops->get_attribute(session, object, &key_type_attr);
+	if (rv != CKR_OK) {
+		rv = CKR_KEY_TYPE_INCONSISTENT;
+		goto out;
+	}
+	rv = sc_pkcs11_encr_init(session, pMechanism, object, key_type);
+out:
+	SC_LOG_RV("C_EncryptInit() = %s", rv);
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 
@@ -833,7 +888,24 @@ CK_RV C_Encrypt(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		CK_BYTE_PTR pEncryptedData,	/* receives encrypted data */
 		CK_ULONG_PTR pulEncryptedDataLen)
 {				/* receives encrypted byte count */
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	CK_RV rv;
+	struct sc_pkcs11_session *session;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_session(hSession, &session);
+	if (rv == CKR_OK) {
+		rv = restore_login_state(session->slot);
+		if (rv == CKR_OK)
+			rv = sc_pkcs11_encr(session, pData, ulDataLen, pEncryptedData, pulEncryptedDataLen);
+		rv = reset_login_state(session->slot, rv);
+	}
+
+	SC_LOG_RV("C_Encrypt() = %s", rv);
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 CK_RV C_EncryptUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
@@ -842,14 +914,45 @@ CK_RV C_EncryptUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		      CK_BYTE_PTR pEncryptedPart,	/* receives encrypted data */
 		      CK_ULONG_PTR pulEncryptedPartLen)
 {				/* receives encrypted byte count */
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	CK_RV rv;
+	struct sc_pkcs11_session *session;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_session(hSession, &session);
+	if (rv == CKR_OK)
+		rv = sc_pkcs11_encr_update(session, pPart, ulPartLen,
+				pEncryptedPart, pulEncryptedPartLen);
+
+	SC_LOG_RV("C_EncryptUpdate() = %s", rv);
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 CK_RV C_EncryptFinal(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		     CK_BYTE_PTR pLastEncryptedPart,	/* receives encrypted last part */
 		     CK_ULONG_PTR pulLastEncryptedPartLen)
 {				/* receives byte count */
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	CK_RV rv;
+	struct sc_pkcs11_session *session;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_session(hSession, &session);
+	if (rv == CKR_OK) {
+		rv = restore_login_state(session->slot);
+		if (rv == CKR_OK)
+			rv = sc_pkcs11_encr_final(session, pLastEncryptedPart, pulLastEncryptedPartLen);
+		rv = reset_login_state(session->slot, rv);
+	}
+
+	SC_LOG_RV("C_EncryptFinal() = %s", rv);
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 CK_RV C_DecryptInit(CK_SESSION_HANDLE hSession,	/* the session's handle */
@@ -902,17 +1005,18 @@ CK_RV C_DecryptInit(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	rv = sc_pkcs11_decr_init(session, pMechanism, object, key_type);
 
 out:
-	sc_log(context, "C_DecryptInit() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_DecryptInit() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 }
 
-CK_RV C_Decrypt(CK_SESSION_HANDLE hSession,	/* the session's handle */
-		CK_BYTE_PTR pEncryptedData,	/* input encrypted data */
-		CK_ULONG ulEncryptedDataLen,	/* count of bytes of input */
-		CK_BYTE_PTR pData,	/* receives decrypted output */
-		CK_ULONG_PTR pulDataLen)
-{				/* receives decrypted byte count */
+CK_RV
+C_Decrypt(CK_SESSION_HANDLE hSession,	     /* the session's handle */
+		CK_BYTE_PTR pEncryptedData,  /* input encrypted data */
+		CK_ULONG ulEncryptedDataLen, /* count of bytes of input */
+		CK_BYTE_PTR pData,	     /* receives decrypted output */
+		CK_ULONG_PTR pulDataLen)     /* receives decrypted byte count */
+{
 	CK_RV rv;
 	struct sc_pkcs11_session *session;
 
@@ -930,25 +1034,64 @@ CK_RV C_Decrypt(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		rv = reset_login_state(session->slot, rv);
 	}
 
-	sc_log(context, "C_Decrypt() = %s", lookup_enum ( RV_T, rv ));
+	/* do not log error code to prevent side channel attack */
+	SC_LOG("C_Decrypt()");
 	sc_pkcs11_unlock();
 	return rv;
 }
 
-CK_RV C_DecryptUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
-		      CK_BYTE_PTR pEncryptedPart,	/* input encrypted data */
-		      CK_ULONG ulEncryptedPartLen,	/* count of bytes of input */
-		      CK_BYTE_PTR pPart,	/* receives decrypted output */
-		      CK_ULONG_PTR pulPartLen)
-{				/* receives decrypted byte count */
-	return CKR_FUNCTION_NOT_SUPPORTED;
+CK_RV
+C_DecryptUpdate(CK_SESSION_HANDLE hSession,  /* the session's handle */
+		CK_BYTE_PTR pEncryptedPart,  /* input encrypted data */
+		CK_ULONG ulEncryptedPartLen, /* count of bytes of input */
+		CK_BYTE_PTR pPart,	     /* receives decrypted output */
+		CK_ULONG_PTR pulPartLen)     /* receives decrypted byte count */
+{
+	CK_RV rv;
+	struct sc_pkcs11_session *session;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_session(hSession, &session);
+	if (rv == CKR_OK)
+		rv = sc_pkcs11_decr_update(session, pEncryptedPart, ulEncryptedPartLen,
+				pPart, pulPartLen);
+
+	/* do not log error code to prevent side channel attack */
+	SC_LOG("C_DecryptUpdate()");
+	sc_pkcs11_unlock();
+	return rv;
 }
 
-CK_RV C_DecryptFinal(CK_SESSION_HANDLE hSession,	/* the session's handle */
-		     CK_BYTE_PTR pLastPart,	/* receives decrypted output */
-		     CK_ULONG_PTR pulLastPartLen)
-{				/* receives decrypted byte count */
-	return CKR_FUNCTION_NOT_SUPPORTED;
+CK_RV
+C_DecryptFinal(CK_SESSION_HANDLE hSession,   /* the session's handle */
+		CK_BYTE_PTR pLastPart,	     /* receives decrypted output */
+		CK_ULONG_PTR pulLastPartLen) /* receives decrypted byte count */
+{
+	CK_RV rv;
+	struct sc_pkcs11_session *session;
+
+	rv = sc_pkcs11_lock();
+	if (rv != CKR_OK)
+		return rv;
+
+	rv = get_session(hSession, &session);
+	if (rv == CKR_OK) {
+		rv = restore_login_state(session->slot);
+		if (rv == CKR_OK) {
+			rv = sc_pkcs11_decr_final(session,
+					pLastPart,
+					pulLastPartLen);
+		}
+		rv = reset_login_state(session->slot, rv);
+	}
+
+	/* do not log error code to prevent side channel attack */
+	SC_LOG("C_DecryptFinal()");
+	sc_pkcs11_unlock();
+	return rv;
 }
 
 CK_RV C_DigestEncryptUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
@@ -1308,8 +1451,8 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession,	/* the session's handle */
 			rv = slot->p11card->framework->get_random(slot, RandomData, ulRandomLen);
 	}
 
+	SC_LOG_RV("C_GenerateRandom() = %s", rv);
 	sc_pkcs11_unlock();
-	sc_log(context, "C_GenerateRandom() = %s", lookup_enum ( RV_T, rv ));
 	return rv;
 }
 
@@ -1359,7 +1502,7 @@ CK_RV C_VerifyInit(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	rv = sc_pkcs11_verif_init(session, pMechanism, object, key_type);
 
 out:
-	sc_log(context, "C_VerifyInit() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_VerifyInit() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 #endif
@@ -1394,7 +1537,7 @@ CK_RV C_Verify(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	}
 
 out:
-	sc_log(context, "C_Verify() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_Verify() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 #endif
@@ -1418,7 +1561,7 @@ CK_RV C_VerifyUpdate(CK_SESSION_HANDLE hSession,	/* the session's handle */
 	if (rv == CKR_OK)
 		rv = sc_pkcs11_verif_update(session, pPart, ulPartLen);
 
-	sc_log(context, "C_VerifyUpdate() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_VerifyUpdate() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 #endif
@@ -1446,7 +1589,7 @@ CK_RV C_VerifyFinal(CK_SESSION_HANDLE hSession,	/* the session's handle */
 		rv = reset_login_state(session->slot, rv);
 	}
 
-	sc_log(context, "C_VerifyFinal() = %s", lookup_enum ( RV_T, rv ));
+	SC_LOG_RV("C_VerifyFinal() = %s", rv);
 	sc_pkcs11_unlock();
 	return rv;
 #endif

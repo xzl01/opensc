@@ -11,7 +11,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
 /* Initially written by David Mattes <david.mattes@boeing.com> */
@@ -67,8 +67,8 @@ typedef struct cdata_st {
 	char	   *label;
 	int	    authority;
 	const char *path;
-	size_t	    index;
-	size_t	    count;
+	int	    index;
+	int	    count;
 	const char *id;
 	int         obj_flags;
 } cdata;
@@ -166,7 +166,8 @@ static int gemsafe_get_cert_len(sc_card_t *card)
 	u8 *iptr;
 	struct sc_path path;
 	struct sc_file *file;
-	size_t objlen, certlen;
+	size_t objlen;
+	int certlen;
 	unsigned int ind, i=0;
 
 	sc_format_path(GEMSAFE_PATH, &path);
@@ -236,7 +237,7 @@ static int gemsafe_get_cert_len(sc_card_t *card)
 	 */
 	iptr = ibuf + GEMSAFE_READ_QUANTUM;
 	while ((size_t)(iptr - ibuf) < objlen) {
-		r = sc_read_binary(card, iptr - ibuf, iptr,
+		r = sc_read_binary(card, (unsigned)(iptr - ibuf), iptr,
 				   MIN(GEMSAFE_READ_QUANTUM, objlen - (iptr - ibuf)), 0);
 		if (r < 0) {
 			sc_log(card->ctx, "Could not read cert object");
@@ -259,9 +260,9 @@ static int gemsafe_get_cert_len(sc_card_t *card)
 			/* DER cert len is encoded this way */
 			if (ind+3 >= sizeof ibuf)
 				return SC_ERROR_INVALID_DATA;
-			certlen = ((((size_t) ibuf[ind+2]) << 8) | ibuf[ind+3]) + 4;
+			certlen = ((((int)ibuf[ind + 2]) << 8) | ibuf[ind + 3]) + 4;
 			sc_log(card->ctx,
-			       "Found certificate of key container %d at offset %d, len %"SC_FORMAT_LEN_SIZE_T"u",
+			       "Found certificate of key container %d at offset %d, len %d",
 			       i+1, ind, certlen);
 			gemsafe_cert[i].index = ind;
 			gemsafe_cert[i].count = certlen;
@@ -305,15 +306,16 @@ static int sc_pkcs15emu_gemsafeV1_init( sc_pkcs15_card_t *p15card)
 
 	sc_log(p15card->card->ctx, "Setting pkcs15 parameters");
 
-	free(p15card->tokeninfo->label);
-	p15card->tokeninfo->label = strdup(APPLET_NAME);
+	set_string(&p15card->tokeninfo->label, APPLET_NAME);
 	if (!p15card->tokeninfo->label)
 		return SC_ERROR_INTERNAL;
 
-	free(p15card->tokeninfo->serial_number);
-	p15card->tokeninfo->serial_number = strdup(DRIVER_SERIAL_NUMBER);
-	if (!p15card->tokeninfo->serial_number)
+	set_string(&p15card->tokeninfo->serial_number, DRIVER_SERIAL_NUMBER);
+	if (!p15card->tokeninfo->serial_number) {
+		free(p15card->tokeninfo->label);
+		p15card->tokeninfo->label = NULL;
 		return SC_ERROR_INTERNAL;
+	}
 
 	/* the GemSAFE applet version number */
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_2_SHORT, 0xca, 0xdf, 0x03);
@@ -325,23 +327,28 @@ static int sc_pkcs15emu_gemsafeV1_init( sc_pkcs15_card_t *p15card)
 	apdu.lc = 0;
 	apdu.datalen = 0;
 	r = sc_transmit_apdu(card, &apdu);
+	if (r < 0)
+		sc_pkcs15_card_clear(p15card);
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 
-	if (apdu.sw1 != 0x90 || apdu.sw2 != 0x00)
+	if (apdu.sw1 != 0x90 || apdu.sw2 != 0x00 || r != SC_SUCCESS) {
+		sc_pkcs15_card_clear(p15card);
 		return SC_ERROR_INTERNAL;
-	if (r != SC_SUCCESS)
-		return SC_ERROR_INTERNAL;
+	}
 
 	/* the manufacturer ID, in this case GemPlus */
-	free(p15card->tokeninfo->manufacturer_id);
-	p15card->tokeninfo->manufacturer_id = strdup(MANU_ID);
-	if (!p15card->tokeninfo->manufacturer_id)
+	set_string(&p15card->tokeninfo->manufacturer_id, MANU_ID);
+	if (!p15card->tokeninfo->manufacturer_id) {
+		sc_pkcs15_card_clear(p15card);
 		return SC_ERROR_INTERNAL;
+	}
 
 	/* determine allocated key containers and length of certificates */
 	r = gemsafe_get_cert_len(card);
-	if (r != SC_SUCCESS)
+	if (r != SC_SUCCESS) {
+		sc_pkcs15_card_clear(p15card);
 		return SC_ERROR_INTERNAL;
+	}
 
 	/* set certs */
 	sc_log(p15card->card->ctx, "Setting certificates");
@@ -404,7 +411,7 @@ static int sc_pkcs15emu_gemsafeV1_init( sc_pkcs15_card_t *p15card)
 		 */
 		if ( p15card->card->flags & 0x0F) {
 			key_ref = p15card->card->flags & 0x0F;
-			sc_log(p15card->card->ctx, 
+			sc_log(p15card->card->ctx,
 				 "Overriding key_ref %d with %d\n",
 				 gemsafe_prkeys[i].ref, key_ref);
 		} else
@@ -420,8 +427,10 @@ static int sc_pkcs15emu_gemsafeV1_init( sc_pkcs15_card_t *p15card)
 	sc_log(p15card->card->ctx, "Selecting application DF");
 	sc_format_path(GEMSAFE_APP_PATH, &path);
 	r = sc_select_file(card, &path, &file);
-	if (r != SC_SUCCESS || !file)
+	if (r != SC_SUCCESS || !file) {
+		sc_pkcs15_card_clear(p15card);
 		return SC_ERROR_INTERNAL;
+	}
 	/* set the application DF */
 	sc_file_free(p15card->file_app);
 	p15card->file_app = file;

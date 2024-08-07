@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -241,10 +241,16 @@ static void scconf_parse_reset_state(scconf_parser * parser)
 	}
 }
 
+void scconf_skip_block(scconf_parser * parser)
+{
+	scconf_parse_error(parser, "too many nested blocks");
+	scconf_parse_reset_state(parser);
+}
+
 void scconf_parse_token(scconf_parser * parser, int token_type, const char *token)
 {
 	scconf_item *item;
-	int len;
+	size_t len;
 
 	if (parser->error) {
 		/* fatal error */
@@ -298,7 +304,7 @@ void scconf_parse_token(scconf_parser * parser, int token_type, const char *toke
 				/* name */
 				parser->state |= STATE_SET;
 				scconf_list_add(&parser->name, stoken);
-			} else if (parser->state == STATE_VALUE) {
+			} else if (parser->state == STATE_VALUE && parser->current_item->type == SCCONF_ITEM_TYPE_VALUE) {
 				/* value */
 				parser->state |= STATE_SET;
 				scconf_list_add(&parser->current_item->value.list,
@@ -320,10 +326,12 @@ void scconf_parse_token(scconf_parser * parser, int token_type, const char *toke
 				scconf_parse_error_not_expect(parser, "{");
 				break;
 			}
+			parser->nested_blocks++;
 			scconf_block_add_internal(parser);
 			scconf_parse_reset_state(parser);
 			break;
 		case '}':
+			parser->nested_blocks--;
 			if (parser->state != 0) {
 				if ((parser->state & STATE_VALUE) == 0 ||
 				    (parser->state & STATE_SET) == 0) {
@@ -381,6 +389,7 @@ int scconf_parse(scconf_context * config)
 	p.config = config;
 	p.block = config->root;
 	p.line = 1;
+	p.nested_blocks = 0;
 
 	if (!scconf_lex_parse(&p, config->filename)) {
 		snprintf(buffer, sizeof(buffer),
@@ -409,6 +418,7 @@ int scconf_parse_string(scconf_context * config, const char *string)
 	p.config = config;
 	p.block = config->root;
 	p.line = 1;
+	p.nested_blocks = 0;
 
 	if (!scconf_lex_parse_string(&p, string)) {
 		snprintf(buffer, sizeof(buffer),
@@ -420,6 +430,8 @@ int scconf_parse_string(scconf_context * config, const char *string)
 	} else {
 		r = 1;
 	}
+
+	scconf_parse_reset_state(&p);
 
 	if (r <= 0)
 		config->errmsg = buffer;

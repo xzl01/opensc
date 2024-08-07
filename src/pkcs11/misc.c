@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/constant-time.h"
 #include "sc-pkcs11.h"
 
 #define DUMP_TEMPLATE_MAX	32
@@ -115,6 +116,8 @@ static CK_RV sc_to_cryptoki_error_common(int rc)
 		return CKR_DEVICE_MEMORY;
 	case SC_ERROR_MEMORY_FAILURE:	/* EEPROM has failed */
 		return CKR_DEVICE_ERROR;
+	case SC_ERROR_WRONG_PADDING:
+		return CKR_ENCRYPTED_DATA_INVALID;
 	}
 	return CKR_GENERAL_ERROR;
 }
@@ -172,7 +175,7 @@ CK_RV reset_login_state(struct sc_pkcs11_slot *slot, CK_RV rv)
 			slot->p11card->framework->logout(slot);
 		}
 
-		if (rv == CKR_USER_NOT_LOGGED_IN) {
+		if (constant_time_eq_s(rv, CKR_USER_NOT_LOGGED_IN)) {
 			slot->login_user = -1;
 			pop_all_login_states(slot);
 		}
@@ -216,8 +219,7 @@ CK_RV push_login_state(struct sc_pkcs11_slot *slot,
 err:
 	if (login) {
 		if (login->pPin) {
-			sc_mem_clear(login->pPin, login->ulPinLen);
-			sc_mem_secure_free(login->pPin, login->ulPinLen);
+			sc_mem_secure_clear_free(login->pPin, login->ulPinLen);
 		}
 		free(login);
 	}
@@ -232,8 +234,7 @@ void pop_login_state(struct sc_pkcs11_slot *slot)
 		if (size > 0) {
 			struct sc_pkcs11_login *login = list_get_at(&slot->logins, size-1);
 			if (login) {
-				sc_mem_clear(login->pPin, login->ulPinLen);
-				sc_mem_secure_free(login->pPin, login->ulPinLen);
+				sc_mem_secure_clear_free(login->pPin, login->ulPinLen);
 				free(login);
 			}
 			if (0 > list_delete_at(&slot->logins, size-1))
@@ -247,8 +248,7 @@ void pop_all_login_states(struct sc_pkcs11_slot *slot)
 	if (sc_pkcs11_conf.atomic && slot) {
 		struct sc_pkcs11_login *login = list_fetch(&slot->logins);
 		while (login) {
-			sc_mem_clear(login->pPin, login->ulPinLen);
-			sc_mem_secure_free(login->pPin, login->ulPinLen);
+			sc_mem_secure_clear_free(login->pPin, login->ulPinLen);
 			free(login);
 			login = list_fetch(&slot->logins);
 		}
@@ -449,6 +449,31 @@ CK_RV attr_find_var(CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount, CK_ULONG type,
 	return attr_extract(pTemplate, ptr, sizep);
 }
 
+static int is_nss_browser(sc_context_t * ctx)
+{
+	const char *basename;
+#ifdef _WIN32
+	const char sep = '\\';
+#else
+	const char sep = '/';
+#endif
+	if (!ctx || !ctx->exe_path)
+		return 0;
+
+	basename = strrchr(ctx->exe_path, sep);
+	if (!basename)
+		basename = ctx->exe_path;
+	else
+		/* discard the separator */
+		basename += sizeof(char);
+
+	if (strstr(basename, "chromium") || strstr(basename, "chrome")
+			|| strstr(basename, "firefox") || strstr(basename, "msedge"))
+		return 1;
+
+	return 0;
+}
+
 void load_pkcs11_parameters(struct sc_pkcs11_config *conf, sc_context_t * ctx)
 {
 	scconf_block *conf_block = NULL;
@@ -457,7 +482,11 @@ void load_pkcs11_parameters(struct sc_pkcs11_config *conf, sc_context_t * ctx)
 
 	/* Set defaults */
 	conf->max_virtual_slots = 16;
-	if (strcmp(ctx->app_name, "onepin-opensc-pkcs11") == 0) {
+	if (is_nss_browser(ctx)) {
+		/* NSS verifies *every* PIN even though only a single one would be
+		 * needed to use one specific key. In known NSS browsers, we set
+		 * slots_per_card to `1` to only look at the authentication PIN, i.e.
+		 * ignoring a potential signature PIN. */
 		conf->slots_per_card = 1;
 	} else {
 		conf->slots_per_card = 4;
@@ -471,7 +500,7 @@ void load_pkcs11_parameters(struct sc_pkcs11_config *conf, sc_context_t * ctx)
 
 	conf_block = sc_get_conf_block(ctx, "pkcs11", NULL, 1);
 	if (!conf_block)
-		return;
+		goto out;
 
 	/* contains the defaults, if there is a "pkcs11" config block */
 	conf->max_virtual_slots = scconf_get_int(conf_block, "max_virtual_slots", conf->max_virtual_slots);
@@ -507,6 +536,7 @@ void load_pkcs11_parameters(struct sc_pkcs11_config *conf, sc_context_t * ctx)
 	}
 	free(tmp);
 
+out:
 	sc_log(ctx, "PKCS#11 options: max_virtual_slots=%d slots_per_card=%d "
 		 "lock_login=%d atomic=%d pin_unblock_style=%d "
 		 "create_slots_flags=0x%X",

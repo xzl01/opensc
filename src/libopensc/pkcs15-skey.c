@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "internal.h"
 #include "pkcs15.h"
@@ -268,4 +268,13 @@ int sc_pkcs15_encode_skdf_entry(struct sc_context *ctx,
 
 	sc_log(ctx, "Key path %s", sc_print_path(&skey->path));
 	LOG_FUNC_RETURN(ctx, r);
+}
+
+void
+sc_pkcs15_free_skey_info(sc_pkcs15_skey_info_t *info)
+{
+	if (info) {
+		free(info->data.value);
+		free(info);
+	}
 }

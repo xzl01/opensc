@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _OPENSC_TYPES_H
@@ -49,6 +49,7 @@ typedef unsigned char u8;
 #define SC_MAX_SDO_ACLS			8
 #define SC_MAX_CRTS_IN_SE		12
 #define SC_MAX_SE_NUM			8
+#define SC_MAX_PKCS15_EMULATORS	48
 
 /* When changing this value, pay attention to the initialization of the ASN1
  * static variables that use this macro, like, for example,
@@ -224,6 +225,11 @@ typedef struct sc_acl_entry {
 #define SC_FILE_EF_CYCLIC		0x06
 #define SC_FILE_EF_CYCLIC_TLV		0x07
 
+/* File flags */
+#define SC_FILE_FLAG_COMPRESSED_AUTO		0x01
+#define SC_FILE_FLAG_COMPRESSED_ZLIB		0x02
+#define SC_FILE_FLAG_COMPRESSED_GZIP		0x04
+
 /* File status flags */
 /* ISO7816-4: Unless otherwise specified, the security attributes are valid for the operational state.*/
 #define SC_FILE_STATUS_ACTIVATED	0x00 /* ISO7816-4: Operational state (activated)   (5, 7) */
@@ -305,6 +311,8 @@ typedef struct sc_file {
 #define SC_APDU_FLAGS_NO_RETRY_WL	0x00000004UL
 /* APDU is from Secure Messaging  */
 #define SC_APDU_FLAGS_NO_SM		0x00000008UL
+/* let SM do the command chaining  */
+#define SC_APDU_FLAGS_SM_CHAINING	0x00000010UL
 
 #define SC_APDU_ALLOCATE_FLAG		0x01
 #define SC_APDU_ALLOCATE_FLAG_DATA	0x02

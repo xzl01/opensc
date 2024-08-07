@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -168,6 +168,8 @@ myeid_erase_card(struct sc_profile *profile, struct sc_pkcs15_card *p15card) {
 	/* ACLs are not actives if file is not in the operational state */
 	if (mf->status == SC_FILE_STATUS_ACTIVATED)
 		r = sc_pkcs15init_authenticate(profile, p15card, mf, SC_AC_OP_DELETE);
+	if (r < 0)
+		sc_file_free(mf);
 	LOG_TEST_RET(ctx, r, "'DELETE' authentication failed on MF");
 
 	data_obj.P1 = 0x01;
@@ -176,6 +178,7 @@ myeid_erase_card(struct sc_profile *profile, struct sc_pkcs15_card *p15card) {
 	data_obj.DataLen = sizeof (data);
 
 	r = sc_card_ctl(p15card->card, SC_CARDCTL_MYEID_PUTDATA, &data_obj);
+	sc_file_free(mf);
 
 	LOG_FUNC_RETURN(p15card->card->ctx, r);
 }
@@ -309,7 +312,7 @@ myeid_create_pin(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	unsigned char data[20];
 	struct sc_cardctl_myeid_data_obj data_obj;
 	struct sc_pkcs15_auth_info *auth_info = (struct sc_pkcs15_auth_info *) pin_obj->data;
-	struct sc_pkcs15_auth_info puk_ainfo;
+	struct sc_pkcs15_auth_info puk_ainfo = {0};
 	int r;
 
 	LOG_FUNC_CALLED(ctx);
@@ -414,6 +417,11 @@ myeid_new_file(sc_profile_t *profile, sc_card_t *card,
 	file->id += num;
 	p = &file->path;
 	*p = profile->df_info->file->path;
+	if (p->len >= SC_MAX_PATH_SIZE - 2) {
+		sc_log(card->ctx, "Wrong path length");
+		sc_file_free(file);
+		return SC_ERROR_INTERNAL;
+	}
 	p->value[p->len++] = (u8) (file->id / 256);
 	p->value[p->len++] = (u8) (file->id % 256);
 
@@ -532,7 +540,8 @@ myeid_create_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	struct sc_pkcs15_object *pin_object = NULL;
 	struct sc_pkcs15_auth_info *pkcs15_auth_info = NULL;
 	unsigned char sec_attrs[] = {0xFF, 0xFF, 0xFF};
-	int r, ef_structure = 0, keybits = 0, pin_reference = -1;
+	int r, ef_structure = 0, pin_reference = -1;
+	size_t keybits = 0;
 	unsigned char prop_info[] = {0x00, 0x00};
 	int extractable = FALSE;
 
@@ -595,10 +604,12 @@ myeid_create_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	r = myeid_new_file(profile, card, object->type, *key_reference, &file);
 	LOG_TEST_RET(ctx, r, "Cannot get new MyEID key file");
 
-	if (!file || !file->path.len)
+	if (!file || !file->path.len || file->path.len > SC_MAX_PATH_SIZE) {
+		sc_file_free(file);
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "Cannot determine key file");
+	}
 
-	sc_log(ctx, "Key file size %d", keybits);
+	sc_log(ctx, "Key file size %zu", keybits);
 	file->size = keybits;
 	file->ef_structure = ef_structure;
 
@@ -698,9 +709,8 @@ myeid_store_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	LOG_TEST_RET(ctx, r, "Cannot store MyEID key: select key file failed");
 
 	r = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_UPDATE);
-	LOG_TEST_RET(ctx, r, "No authorisation to store MyEID private key");
-
 	sc_file_free(file);
+	LOG_TEST_RET(ctx, r, "No authorisation to store MyEID private key");
 
 	/* Fill in data structure */
 	memset(&args, 0, sizeof (args));
@@ -771,7 +781,7 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	int r;
 	unsigned int cla,tag;
 	size_t taglen;
-	size_t keybits = key_info->modulus_length;
+	unsigned int keybits = (unsigned int)key_info->modulus_length;
 	u8 raw_pubkey[MYEID_MAX_RSA_KEY_LEN / 8];
 	u8* dataptr;
 
@@ -788,16 +798,16 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 		case SC_PKCS15_TYPE_PRKEY_EC:
 			/* EC is supported in MyEID v > 3.5. TODO: set correct return value if older MyEID version. */
 			/* Here the information about curve is not available, that's why supported algorithm is checked
-			   without curve OID. */						
-                    
+			   without curve OID. */
+
 			if(key_info->field_length != 0)
-				keybits = key_info->field_length;
+				keybits = (unsigned int)key_info->field_length;
 			else
 				key_info->field_length = keybits;
-			
+
 			if (sc_card_find_ec_alg(p15card->card, keybits, NULL) == NULL)
 				LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "Unsupported EC key size");
-			
+
 			break;
 		default:
 			LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "Unsupported key type");
@@ -810,6 +820,8 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	LOG_TEST_RET(ctx, r, "Cannot generate key: failed to select key file");
 
 	r = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_GENERATE);
+	if (r < 0)
+		sc_file_free(file);
 	LOG_TEST_RET(ctx, r, "No authorisation to generate private key");
 
 	/* Fill in data structure */
@@ -826,6 +838,8 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 
 	/* Generate the key  */
 	r = sc_card_ctl(card, SC_CARDCTL_MYEID_GENERATE_STORE_KEY, &args);
+	if (r < 0)
+		sc_file_free(file);
 	LOG_TEST_RET(ctx, r, "Card control 'MYEID_GENERATE_STORE_KEY' failed");
 
 	/* Key pair generation -> collect public key info */
@@ -842,6 +856,8 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 
 			/* Get public key modulus */
 			r = sc_select_file(card, &file->path, NULL);
+			sc_file_free(file);
+			file = NULL;
 			LOG_TEST_RET(ctx, r, "Cannot get key modulus: select key file failed");
 
 			data_obj.P1 = 0x01;
@@ -867,6 +883,8 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 			pubkey->algorithm = SC_ALGORITHM_EC;
 
 			r = sc_select_file(card, &file->path, NULL);
+			sc_file_free(file);
+			file = NULL;
 			LOG_TEST_RET(ctx, r, "Cannot get public key: select key file failed");
 
 			data_obj.P1 = 0x01;
@@ -906,9 +924,14 @@ myeid_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 			pubkey->u.ec.params.der.len = 0;
 
 			pubkey->u.ec.params.named_curve = strdup(ecparams->named_curve);
-			if (!pubkey->u.ec.params.named_curve)
+			if (!pubkey->u.ec.params.named_curve) {
+				free(pubkey->u.ec.ecpointQ.value);
 				LOG_FUNC_RETURN(ctx, SC_ERROR_OUT_OF_MEMORY);
+			}
+
 			r = sc_pkcs15_fix_ec_parameters(ctx, &pubkey->u.ec.params);
+			if (r < 0)
+				free(pubkey->u.ec.ecpointQ.value);
 			LOG_TEST_RET(ctx, r, "Cannot fix EC parameters");
 		}
 	}

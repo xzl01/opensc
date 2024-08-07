@@ -25,7 +25,14 @@
 #include <openssl/x509.h>
 #include <openssl/rsa.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+# include <openssl/core_names.h>
+# include <openssl/param_build.h>
+#endif
 #include "p11test_common.h"
+
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 typedef struct {
 	unsigned char	*key_id;
@@ -33,11 +40,7 @@ typedef struct {
 	char		*id_str;
 	X509		*x509;
 	int		 type;
-	union {
-		RSA		*rsa;
-		EC_KEY	*ec;
-		EVP_PKEY	*pkey;
-	} key;
+	EVP_PKEY	*key;
 	CK_OBJECT_HANDLE private_handle;
 	CK_OBJECT_HANDLE public_handle;
 	CK_BBOOL	sign;
@@ -50,32 +53,40 @@ typedef struct {
 	CK_BBOOL	derive_pub;
 	CK_KEY_TYPE	key_type;
 	CK_BBOOL	always_auth;
+	CK_BBOOL	extractable;
 	char		*label;
 	CK_ULONG 	 bits;
+	char 		*value;
 	int			verify_public;
 	test_mech_t	mechs[MAX_MECHS];
-	int			num_mechs;
+	size_t			num_mechs;
 } test_cert_t;
 
 typedef struct {
+	unsigned int alloc_count;
 	unsigned int count;
 	test_cert_t *data;
 } test_certs_t;
+
+void test_certs_init(test_certs_t *objects);
 
 void always_authenticate(test_cert_t *o, token_info_t *info);
 
 int search_objects(test_certs_t *objects, token_info_t *info,
 	CK_ATTRIBUTE filter[], CK_LONG filter_size, CK_ATTRIBUTE template[], CK_LONG template_size,
-	int (*callback)(test_certs_t *, CK_ATTRIBUTE[], unsigned int, CK_OBJECT_HANDLE));
+	int (*callback)(test_certs_t *, CK_ATTRIBUTE[], unsigned long, CK_OBJECT_HANDLE));
 void search_for_all_objects(test_certs_t *objects, token_info_t *info);
 void clean_all_objects(test_certs_t *objects);
 
-const char *get_mechanism_name(int mech_id);
-const char *get_mgf_name(int mech_id);
-const char *get_mechanism_flag_name(int flag_id);
+const char *get_mechanism_name(unsigned long mech_id);
+const char *get_mgf_name(unsigned long mech_id);
+const char *get_mechanism_flag_name(unsigned long flag_id);
+const char *get_mechanism_all_flag_name(unsigned long flag_id);
 char *convert_byte_string(unsigned char *id, unsigned long length);
 
 int is_pss_mechanism(CK_MECHANISM_TYPE mech);
+
+CK_RV destroy_tmp_object(token_info_t *info, CK_OBJECT_HANDLE o);
 
 // TODO sanitize inputs
 

@@ -133,7 +133,7 @@
 				You can do this using:
 			</para>
 			<para>
-				<command>pkcs15-init --generate-key " keyspec " --auth-id " nn</command>
+				<command>pkcs15-init --generate-key "keyspec" --auth-id "nn"</command>
 			</para>
 			<para>
 				where <replaceable>keyspec</replaceable> describes the algorithm and the parameters
@@ -173,7 +173,7 @@
 				Note that usage of <option>--id</option> option in the <command>pkcs15-init</command>
 				commands to generate or to import a new key is deprecated.
 				Better practice is to let the middleware to derive the identifier from the key material.
-				(SHA1(modulus) for RSA, SHA1(pub) for DSA, ...).
+				(SHA1(modulus) for RSA, ...).
 				This allows easily set up relation between 'related' objects
 				(private/public keys and certificates).
 			</para>
@@ -611,8 +611,7 @@
 
 				<varlistentry>
 					<term>
-						<option>--sanity-check</option>,
-						<option>-T</option>
+						<option>--sanity-check</option>
 					</term>
 					<listitem>
 						<para>
@@ -669,11 +668,34 @@
 
 				<varlistentry>
 					<term>
+						<option>--auth-id</option> <replaceable>filename</replaceable>,
+						<option>-a</option> <replaceable>filename</replaceable>
+					</term>
+					<listitem>
+						<para>
+							Specify ID of PIN to use/create
+						</para>
+					</listitem>
+				</varlistentry>
+
+				<varlistentry>
+					<term>
 						<option>--puk-id</option> <replaceable>ID</replaceable>
 					</term>
 					<listitem>
 						<para>
 							Specify ID of PUK to use/create
+						</para>
+					</listitem>
+				</varlistentry>
+
+				<varlistentry>
+					<term>
+						<option>--label</option> <replaceable>LABEL</replaceable>
+					</term>
+					<listitem>
+						<para>
+							Specify label for a PIN, key, certificate or data object when creating a new objects. When deleting objects, this can be used to delete object by label.
 						</para>
 					</listitem>
 				</varlistentry>

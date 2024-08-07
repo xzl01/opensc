@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -106,7 +106,7 @@ get_next_profile_path(const char **profiles_ini, const char *home, const char *b
 		}
 		/* adjust format to respect the maximum length of profile_path */
 		char format[32];
-		if (0 > snprintf(format, sizeof(format), "Path=%%%ds", (int)(p_len-1))
+		if (0 > snprintf(format, sizeof(format), "Path=%%%d[^\n]", (int)(p_len-1))
 				|| 1 != sscanf(path, format, p))
 			continue;
 
@@ -231,13 +231,9 @@ add_module_firefox(const char *module_path, const char *module_name, const char 
 		{"APPDATA", "Mozilla\\Firefox"},
 #else
 		{"HOME", ".mozilla/firefox"},
+		{"HOME", ".mozilla/firefox-esr"},
 #endif
 	};
-
-	if (0 == strcmp(module_path, default_pkcs11_provider)) {
-		module_path = default_onepin_pkcs11_provider;
-		exclude_module_path = default_pkcs11_provider;
-	}
 
 	add_module_mozilla(locations, sizeof locations/sizeof *locations,
 			module_path, module_name, exclude_module_path);

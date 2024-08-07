@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 
@@ -191,13 +191,16 @@ authentic_pkcs15_erase_card(struct sc_profile *profile, struct sc_pkcs15_card *p
 		rv = sc_erase_binary(p15card->card, 0, file->size, 0);
 		if (rv == SC_ERROR_SECURITY_STATUS_NOT_SATISFIED)   {
 			rv = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_UPDATE);
+			if (rv < 0)
+				sc_file_free(file);
+
 			LOG_TEST_RET(ctx, rv, "'UPDATE' authentication failed");
 
 			rv = sc_erase_binary(p15card->card, 0, file->size, 0);
 		}
-		LOG_TEST_RET(ctx, rv, "Binary erase error");
 
 		sc_file_free(file);
+		LOG_TEST_RET(ctx, rv, "Binary erase error");
 
 		profile->dirty = 1;
 	}
@@ -543,12 +546,15 @@ authentic_pkcs15_create_key(struct sc_profile *profile, struct sc_pkcs15_card *p
 	key_info->key_reference |= AUTHENTIC_OBJECT_REF_FLAG_LOCAL;
 
 	rv = sc_select_file(card, &file_p_prvkey->path, &parent);
+	if (rv != SC_SUCCESS)
+		sc_file_free(file_p_prvkey);
 	LOG_TEST_RET(ctx, rv, "DF for the private objects not defined");
 
 	rv = sc_pkcs15init_authenticate(profile, p15card, parent, SC_AC_OP_CRYPTO);
-	LOG_TEST_RET(ctx, rv, "SC_AC_OP_CRYPTO authentication failed for parent DF");
-
 	sc_file_free(parent);
+	if (rv != SC_SUCCESS)
+		sc_file_free(file_p_prvkey);
+	LOG_TEST_RET(ctx, rv, "SC_AC_OP_CRYPTO authentication failed for parent DF");
 
 	key_info->access_flags = SC_PKCS15_PRKEY_ACCESS_NEVEREXTRACTABLE
 		| SC_PKCS15_PRKEY_ACCESS_ALWAYSSENSITIVE
@@ -557,6 +563,7 @@ authentic_pkcs15_create_key(struct sc_profile *profile, struct sc_pkcs15_card *p
 	rv = authentic_sdo_allocate_prvkey(profile, card, key_info, &sdo);
 	if (rv != SC_SUCCESS || sdo == NULL) {
 		sc_log(ctx, "IasEcc: init SDO private key failed");
+		sc_file_free(file_p_prvkey);
 		LOG_FUNC_RETURN(ctx, rv);
 	}
 
@@ -593,6 +600,9 @@ authentic_pkcs15_create_key(struct sc_profile *profile, struct sc_pkcs15_card *p
 	LOG_TEST_GOTO_ERR(ctx, rv, "Failed to allocate PrvKey SDO as object content");
 
 err:
+	if (sdo == NULL || sdo->file != file_p_prvkey)
+		sc_file_free(file_p_prvkey);
+	authentic_free_sdo_data(sdo);
 	free(sdo);
 	LOG_FUNC_RETURN(ctx, rv);
 }
@@ -852,19 +862,22 @@ authentic_emu_update_tokeninfo(struct sc_profile *profile, struct sc_pkcs15_card
 	struct sc_file *file = NULL;
 	struct sc_path path;
 	unsigned char buffer[8];
-	int rv,len;
+	int rv;
+	size_t len;
 
-        sc_format_path(AUTHENTIC_CACHE_TIMESTAMP_PATH, &path);
-        rv = sc_select_file(p15card->card, &path, &file);
-        if (!rv)   {
+	sc_format_path(AUTHENTIC_CACHE_TIMESTAMP_PATH, &path);
+	rv = sc_select_file(p15card->card, &path, &file);
+	if (!rv) {
 		rv = sc_get_challenge(p15card->card, buffer, sizeof(buffer));
-		LOG_TEST_RET(ctx, rv, "Get challenge error");
+		if (rv < 0) {
+			sc_file_free(file);
+			LOG_TEST_RET(ctx, rv, "Get challenge error");
+		}
 
 		len = file->size > sizeof(buffer) ? sizeof(buffer) : file->size;
-	        rv = sc_update_binary(p15card->card, 0, buffer, len, 0);
-		LOG_TEST_RET(ctx, rv, "Update binary error");
-
+		rv = sc_update_binary(p15card->card, 0, buffer, len, 0);
 		sc_file_free(file);
+		LOG_TEST_RET(ctx, rv, "Update binary error");
 	}
 
 	LOG_FUNC_RETURN(ctx, SC_SUCCESS);

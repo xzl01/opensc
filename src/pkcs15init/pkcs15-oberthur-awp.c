@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  *  best view with tabstop=4
  *
@@ -171,7 +171,7 @@ awp_new_file(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 				ifile->path.value[ifile->path.len-2] |= 0x01;
 			}
 
-			sc_log(ctx, 
+			sc_log(ctx,
 				 "info_file(id:%04X,size:%"SC_FORMAT_LEN_SIZE_T"u,rlen:%"SC_FORMAT_LEN_SIZE_T"u)",
 				 ifile->id, ifile->size, ifile->record_length);
 			*info_out = ifile;
@@ -182,7 +182,7 @@ awp_new_file(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 	}
 
 	if (ofile)   {
-		sc_log(ctx, 
+		sc_log(ctx,
 			 "obj file %04X; size %"SC_FORMAT_LEN_SIZE_T"u; ",
 			 ofile->id, ofile->size);
 		if (obj_out)
@@ -325,13 +325,13 @@ awp_create_container(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 
 	rv = awp_new_file(p15card, profile, COSM_CONTAINER_LIST, 0, &clist, NULL);
 	LOG_TEST_RET(ctx, rv, "Create container failed");
-	sc_log(ctx,  "contaner cfile(rcount:%"SC_FORMAT_LEN_SIZE_T"u,rlength:%"SC_FORMAT_LEN_SIZE_T"u)", clist->record_count, clist->record_length);
+	sc_log(ctx,  "container cfile(rcount:%"SC_FORMAT_LEN_SIZE_T"u,rlength:%"SC_FORMAT_LEN_SIZE_T"u)", clist->record_count, clist->record_length);
 
 	rv = sc_select_file(p15card->card, &clist->path, &file);
 	LOG_TEST_RET(ctx, rv, "Create container failed: cannot select container's list");
 	file->record_length = clist->record_length;
 
-	sc_log(ctx,  "contaner file(rcount:%"SC_FORMAT_LEN_SIZE_T"u,rlength:%"SC_FORMAT_LEN_SIZE_T"u)", file->record_count, file->record_length);
+	sc_log(ctx,  "container file(rcount:%"SC_FORMAT_LEN_SIZE_T"u,rlength:%"SC_FORMAT_LEN_SIZE_T"u)", file->record_count, file->record_length);
 	sc_log(ctx,  "Append new record %"SC_FORMAT_LEN_SIZE_T"u for private key", file->record_count + 1);
 
 	rv = awp_create_container_record(p15card, profile, file, acc);
@@ -353,7 +353,7 @@ awp_update_container_entry (struct sc_pkcs15_card *p15card, struct sc_profile *p
 	unsigned char *buff = NULL;
 
 	LOG_FUNC_CALLED(ctx);
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "update container entry(type:%X,id %i,rec %"SC_FORMAT_LEN_SIZE_T"u,offs %i",
 		 type, file_id, rec, offs);
 	sc_log(ctx,  "container file(file-id:%X,rlen:%"SC_FORMAT_LEN_SIZE_T"u,rcount:%"SC_FORMAT_LEN_SIZE_T"u)",
@@ -371,7 +371,7 @@ awp_update_container_entry (struct sc_pkcs15_card *p15card, struct sc_profile *p
 	else   {
 		rv = sc_select_file(p15card->card, &list_file->path, NULL);
 		if (!rv)
-			rv = sc_read_record(p15card->card, rec, buff, list_file->record_length, SC_RECORD_BY_REC_NR);
+			rv = sc_read_record(p15card->card, (unsigned int)rec, 0, buff, list_file->record_length, SC_RECORD_BY_REC_NR);
 	}
 	if (rv < 0)   {
 		free(buff);
@@ -415,7 +415,7 @@ awp_update_container_entry (struct sc_pkcs15_card *p15card, struct sc_profile *p
 			rv = sc_append_record(p15card->card, buff, list_file->record_length, SC_RECORD_BY_REC_NR);
 	}
 	else   {
-		rv = sc_update_record(p15card->card, rec, buff, list_file->record_length, SC_RECORD_BY_REC_NR);
+		rv = sc_update_record(p15card->card, (unsigned int)rec, 0, buff, list_file->record_length, SC_RECORD_BY_REC_NR);
 	}
 
 	free(buff);
@@ -431,7 +431,8 @@ awp_update_container(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 	struct sc_file *clist = NULL, *file = NULL;
 	struct sc_path  private_path;
 	int rv = 0;
-	size_t rec, rec_offs;
+	size_t rec;
+	int rec_offs;
 	unsigned char *list = NULL;
 
 	LOG_FUNC_CALLED(ctx);
@@ -477,7 +478,7 @@ awp_update_container(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 	for (rec=0; rec < file->record_count; rec++)   {
 		unsigned char tmp[256];
 
-		rv = sc_read_record(p15card->card, rec + 1, tmp, sizeof(tmp), SC_RECORD_BY_REC_NR);
+		rv = sc_read_record(p15card->card, (unsigned int)rec + 1, 0, tmp, sizeof(tmp), SC_RECORD_BY_REC_NR);
 		if (rv >= AWP_CONTAINER_RECORD_LEN)
 			memcpy(list + rec*AWP_CONTAINER_RECORD_LEN, tmp, AWP_CONTAINER_RECORD_LEN);
 		else
@@ -488,8 +489,8 @@ awp_update_container(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 		for (rec_offs=0; !rv && rec_offs<12; rec_offs+=6)   {
 			int offs;
 
-			sc_log(ctx,  "rec %"SC_FORMAT_LEN_SIZE_T"u; rec_offs %"SC_FORMAT_LEN_SIZE_T"u", rec, rec_offs);
-			offs = rec*AWP_CONTAINER_RECORD_LEN + rec_offs;
+			sc_log(ctx,  "rec %zu; rec_offs %d", rec, rec_offs);
+			offs = (int)rec*AWP_CONTAINER_RECORD_LEN + rec_offs;
 			if (*(list + offs + 2))   {
 				unsigned char *buff = NULL;
 				int id_offs;
@@ -643,6 +644,7 @@ awp_update_object_list(struct sc_pkcs15_card *p15card, struct sc_profile *profil
 	unsigned char *buff = NULL;
 	int rv;
 	unsigned ii;
+	unsigned long flags;
 
 	LOG_FUNC_CALLED(ctx);
 	sc_log(ctx,  "type %i, num %i", type, num);
@@ -722,7 +724,8 @@ awp_update_object_list(struct sc_pkcs15_card *p15card, struct sc_profile *profil
 	if (rv < 0)
 		goto done;
 
-	rv = sc_read_binary(p15card->card, 0, buff, lst_file->size, lst_file->ef_structure);
+	flags = lst_file->ef_structure;
+	rv = sc_read_binary(p15card->card, 0, buff, lst_file->size, &flags);
 	if (rv < 0)
 		goto done;
 
@@ -734,7 +737,7 @@ awp_update_object_list(struct sc_pkcs15_card *p15card, struct sc_profile *profil
 		goto done;
 	}
 
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "ii %i, rv %i; %X; %"SC_FORMAT_LEN_SIZE_T"u",
 		 ii, rv, file->id, file->size);
 	*(buff + ii) = COSM_LIST_TAG;
@@ -769,10 +772,6 @@ awp_encode_key_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *obj
 	int r = 0;
 
 	LOG_FUNC_CALLED(ctx);
-#if OPENSSL_VERSION_NUMBER < 0x30000000L
-	ERR_load_ERR_strings();
-#endif
-	ERR_load_crypto_strings();
 
 	key_info = (struct sc_pkcs15_prkey_info *)obj->data;
 
@@ -789,14 +788,14 @@ awp_encode_key_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *obj
 
 	ki->label.value = (unsigned char *)strdup(obj->label);
 	ki->label.len = strlen(obj->label);
-	sc_log(ctx, 
-		 "cosm_encode_key_info() label(%u):%s",
+	sc_log(ctx,
+		 "cosm_encode_key_info() label(%zu):%s",
 		 ki->label.len, ki->label.value);
 
 	/*
 	 * Oberthur saves modulus value without tag and length.
 	 */
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "pubkey->modulus.len %"SC_FORMAT_LEN_SIZE_T"u",
 		 pubkey->modulus.len);
 	ki->modulus.value = malloc(pubkey->modulus.len);
@@ -829,10 +828,6 @@ awp_encode_key_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *obj
 
 	sc_log(ctx,  "cosm_encode_key_info() label:%s",ki->label.value);
 done:
-#if OPENSSL_VERSION_NUMBER < 0x30000000L
-	ERR_load_ERR_strings();
-#endif
-	ERR_load_crypto_strings();
 	LOG_FUNC_RETURN(ctx, r);
 }
 
@@ -937,17 +932,12 @@ awp_encode_cert_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *ob
 
 	LOG_FUNC_CALLED(ctx);
 
-#if OPENSSL_VERSION_NUMBER < 0x30000000L
-	ERR_load_ERR_strings();
-#endif
-	ERR_load_crypto_strings();
-
 	if (!obj || !ci)
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "AWP encode cert failed: invalid parameters");
 
 	cert_info = (struct sc_pkcs15_cert_info *)obj->data;
 
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "Encode cert(%s,id:%s,der(%p,%"SC_FORMAT_LEN_SIZE_T"u))",
 		 obj->label, sc_pkcs15_print_id(&cert_info->id),
 		 obj->content.value, obj->content.len);
@@ -956,7 +946,7 @@ awp_encode_cert_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *ob
 	ci->label.value = (unsigned char *)strdup(obj->label);
 	ci->label.len = strlen(obj->label);
 
-	mem = BIO_new_mem_buf(obj->content.value, obj->content.len);
+	mem = BIO_new_mem_buf(obj->content.value, (int)obj->content.len);
 	if (!mem)
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_DATA, "AWP encode cert failed: invalid data");
 
@@ -1030,9 +1020,9 @@ awp_encode_cert_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *ob
 	 * serial number
 	 */
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	
-	/* TODO the der encoding of a ANS1_INTEGER is a TLV, the original code only as using the 
-	 * i2c_ASN1_INTEGER which is not in OpenSSL 1.1  
+
+	/* TODO the der encoding of a ANS1_INTEGER is a TLV, the original code only as using the
+	 * i2c_ASN1_INTEGER which is not in OpenSSL 1.1
 	 * It was adding the tag V_ASN1_INTEGER and the one byte length back in in effect creating
 	 * a DER encoded ASN1_INTEGER
 	 * So we can simplify the code and make compatible with OpenSSL 1.1. This needs to be tested
@@ -1050,7 +1040,7 @@ awp_encode_cert_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *ob
 		ci->serial.len = i2d_ASN1_INTEGER(X509_get_serialNumber(x), &ci->serial.value);
 	}
 	/* if len == 0, and value == NULL, then the cert did not have a serial number.*/
-	sc_log(ctx,  "cert. serial encoded length %i", ci->serial.len);
+	sc_log(ctx,  "cert. serial encoded length %zu", ci->serial.len);
 
 #else
 	do   {
@@ -1078,10 +1068,9 @@ awp_encode_cert_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *ob
 err:
 	ERR_print_errors_fp(stderr);
 	ERR_clear_error();
-	ERR_free_strings();
 	if (pubkey.exponent.data) free(pubkey.exponent.data);
 	if (pubkey.modulus.data) free(pubkey.modulus.data);
-	if (x) 		X509_free(x);
+	if (x) X509_free(x);
 	if (mem)	BIO_free(mem);
 	if (buff)	OPENSSL_free(buff);
 
@@ -1130,7 +1119,7 @@ awp_encode_data_info(struct sc_pkcs15_card *p15card, struct sc_pkcs15_object *ob
 
 	data_info = (struct sc_pkcs15_data_info *)obj->data;
 
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "Encode data(%s,id:%s,der(%p,%"SC_FORMAT_LEN_SIZE_T"u))",
 		 obj->label, sc_pkcs15_print_id(&data_info->id),
 		 obj->content.value, obj->content.len);
@@ -1407,7 +1396,7 @@ awp_update_df_create_cert(struct sc_pkcs15_card *p15card, struct sc_profile *pro
 	LOG_TEST_RET(ctx, rv, "COSM new file error");
 
 	memset(&icert, 0, sizeof(icert));
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "Cert Der(%p,%"SC_FORMAT_LEN_SIZE_T"u)", der.value, der.len);
 	rv = awp_encode_cert_info(p15card, obj, &icert);
 	SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE, rv, "'Create Cert' update DF failed: cannot encode info");
@@ -1469,11 +1458,12 @@ awp_update_df_create_prvkey(struct sc_pkcs15_card *p15card, struct sc_profile *p
 	rv = sc_pkcs15_find_cert_by_id(p15card, &key_info->id, &cert_obj);
 	if (!rv)   {
 		struct sc_pkcs15_cert_info *cert_info = (struct sc_pkcs15_cert_info *) cert_obj->data;
+		int private_obj = cert_obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
 
 		path = cert_info->path;
 		cc.cert_id = (path.value[path.len-1] & 0xFF) + (path.value[path.len-2] & 0xFF) * 0x100;
 
-		rv = sc_pkcs15_read_certificate(p15card, cert_info, &p15cert);
+		rv = sc_pkcs15_read_certificate(p15card, cert_info, private_obj, &p15cert);
 		SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE, rv, "AWP 'update private key' DF failed:  cannot get certificate");
 
 		rv = sc_pkcs15_allocate_object_content(ctx, cert_obj, p15cert->data.value, p15cert->data.len);
@@ -1496,7 +1486,7 @@ awp_update_df_create_prvkey(struct sc_pkcs15_card *p15card, struct sc_profile *p
 	SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE, rv, "New private key info file error");
 
 	pubkey.algorithm = SC_ALGORITHM_RSA;
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "PrKey Der(%p,%"SC_FORMAT_LEN_SIZE_T"u)", der.value, der.len);
 	rv = sc_pkcs15_decode_pubkey(ctx, &pubkey, der.value, der.len);
 	SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE, rv, "AWP 'update private key' DF failed: decode public key error");
@@ -1551,7 +1541,7 @@ awp_update_df_create_pubkey(struct sc_pkcs15_card *p15card, struct sc_profile *p
 	SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE, rv, "New public key info file error");
 
 	pubkey.algorithm = SC_ALGORITHM_RSA;
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "PrKey Der(%p,%"SC_FORMAT_LEN_SIZE_T"u)", der.value, der.len);
 	rv = sc_pkcs15_decode_pubkey(ctx, &pubkey, der.value, der.len);
 	SC_TEST_GOTO_ERR(ctx, SC_LOG_DEBUG_VERBOSE, rv, "AWP 'update public key' DF failed: decode public key error");
@@ -1662,19 +1652,19 @@ awp_delete_from_container(struct sc_pkcs15_card *p15card,
 	sc_log(ctx,  "update container entry (type:%X,file-id:%X)", type, file_id);
 
 	rv = awp_new_file(p15card, profile, COSM_CONTAINER_LIST, 0, &clist, NULL);
-	LOG_TEST_RET(ctx, rv, "AWP update contaner entry: cannot get allocate AWP file");
+	LOG_TEST_RET(ctx, rv, "AWP update container entry: cannot get allocate AWP file");
 
 	rv = sc_select_file(p15card->card, &clist->path, &file);
-	LOG_TEST_RET(ctx, rv, "AWP update contaner entry: cannot select container list file");
+	LOG_TEST_RET(ctx, rv, "AWP update container entry: cannot select container list file");
 
 	buff = malloc(file->record_length);
 	if (!buff)
 		LOG_TEST_RET(ctx, SC_ERROR_OUT_OF_MEMORY, "AWP update container entry: allocation error");
 
 	for (rec = 1; rec <= (unsigned)file->record_count; rec++)   {
-		rv = sc_read_record(p15card->card, rec, buff, file->record_length, SC_RECORD_BY_REC_NR);
+		rv = sc_read_record(p15card->card, rec, 0, buff, file->record_length, SC_RECORD_BY_REC_NR);
 		if (rv < 0)   {
-			sc_log(ctx,  "AWP update contaner entry: read record error %i", rv);
+			sc_log(ctx,  "AWP update container entry: read record error %i", rv);
 			break;
 		}
 		rec_len = rv;
@@ -1693,26 +1683,26 @@ awp_delete_from_container(struct sc_pkcs15_card *p15card,
 		if (!memcmp(buff,"\0\0\0\0\0\0\0\0\0\0\0\0",12))   {
 			rv = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_ERASE);
 			if (rv < 0)   {
-				sc_log(ctx,  "AWP update contaner entry: 'erase' authentication error %i", rv);
+				sc_log(ctx,  "AWP update container entry: 'erase' authentication error %i", rv);
 				break;
 			}
 
 			rv = sc_delete_record(p15card->card, rec);
 			if (rv < 0)   {
-				sc_log(ctx,  "AWP update contaner entry: delete record error %i", rv);
+				sc_log(ctx,  "AWP update container entry: delete record error %i", rv);
 				break;
 			}
 		}
 		else   {
 			rv = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_UPDATE);
 			if (rv < 0)   {
-				sc_log(ctx,  "AWP update contaner entry: 'update' authentication error %i", rv);
+				sc_log(ctx,  "AWP update container entry: 'update' authentication error %i", rv);
 				break;
 			}
 
-			rv = sc_update_record(p15card->card, rec, buff, rec_len, SC_RECORD_BY_REC_NR);
+			rv = sc_update_record(p15card->card, rec, 0, buff, rec_len, SC_RECORD_BY_REC_NR);
 			if (rv < 0)   {
-				sc_log(ctx,  "AWP update contaner entry: update record error %i", rv);
+				sc_log(ctx,  "AWP update container entry: update record error %i", rv);
 				break;
 			}
 		}

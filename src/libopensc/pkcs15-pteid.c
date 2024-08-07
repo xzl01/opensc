@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  * Based on the PKCS#15 emulation layer for EstEID card by Martin Paljak
  *
@@ -194,6 +194,7 @@ static int sc_pkcs15emu_pteid_init(sc_pkcs15_card_t * p15card)
 	rv = parse_odf(buf, len, p15card);
 	if (rv != SC_SUCCESS) {
 		sc_log(ctx, "Decoding of ODF failed: %d", rv);
+		sc_pkcs15_card_clear(p15card);
 		LOG_FUNC_RETURN(ctx, rv);
 	}
 

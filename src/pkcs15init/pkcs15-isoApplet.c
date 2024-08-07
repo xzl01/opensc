@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -362,17 +362,17 @@ isoApplet_generate_key_rsa(sc_pkcs15_prkey_info_t *key_info, sc_card_t *card,
 
 	/* Check key size: */
 	keybits = key_info->modulus_length;
-	if (keybits != 2048)
+	if (keybits != 2048 && keybits != 4096)
 	{
 		rv = SC_ERROR_INVALID_ARGUMENTS;
-		sc_log(card->ctx, "%s: RSA private key length is unsupported, correct length is 2048", sc_strerror(rv));
+		sc_log(card->ctx, "%s: RSA private key length is unsupported, correct length is 2048 or 4096", sc_strerror(rv));
 		goto err;
 	}
 
 	/* Generate the key.
 	 * Note: key size is not explicitly passed to the card.
-	 * It assumes 2048 along with the algorithm reference. */
-	args.algorithm_ref = SC_ISOAPPLET_ALG_REF_RSA_GEN_2048;
+	 * Its derived from the algorithm reference. */
+	args.algorithm_ref = keybits == 2048 ? SC_ISOAPPLET_ALG_REF_RSA_GEN_2048 : SC_ISOAPPLET_ALG_REF_RSA_GEN_4096;
 	args.priv_key_ref = key_info->key_reference;
 
 	args.pubkey.rsa.modulus.len = keybits / 8;
@@ -548,6 +548,7 @@ isoApplet_generate_key_ec(const sc_pkcs15_prkey_info_t *key_info, sc_card_t *car
 	memcpy(pubkey->u.ec.ecpointQ.value, args.pubkey.ec.ecPointQ.value, args.pubkey.ec.ecPointQ.len);
 
 	/* The OID is also written to the pubkey->u.ec.params */
+	free(pubkey->u.ec.params.der.value);
 	pubkey->u.ec.params.der.value = malloc(alg_id_params->der.len);
 	if(!pubkey->u.ec.params.der.value)
 	{
@@ -576,7 +577,12 @@ out:
 			pubkey->u.ec.params.der.value = NULL;
 			pubkey->u.ec.params.der.len = 0;
 		}
-		if(r < 0 && pubkey->u.ec.ecpointQ.value)
+		if(pubkey->u.ec.params.named_curve)
+		{
+			free(pubkey->u.ec.params.named_curve);
+			pubkey->u.ec.params.named_curve = NULL;
+		}
+		if(pubkey->u.ec.ecpointQ.value)
 		{
 			free(pubkey->u.ec.ecpointQ.value);
 			pubkey->u.ec.ecpointQ.value = NULL;

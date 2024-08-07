@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -97,7 +97,7 @@ sc_gp_get_session_key(struct sc_context *ctx, struct sm_gp_session *gp_session,
 		unsigned char *key)
 {
 	int out_len;
-	unsigned char *out;
+	unsigned char *out = NULL;
 	unsigned char deriv[16];
 
 	memcpy(deriv,		gp_session->card_challenge + 4,	4);
@@ -105,10 +105,9 @@ sc_gp_get_session_key(struct sc_context *ctx, struct sm_gp_session *gp_session,
 	memcpy(deriv + 8,	gp_session->card_challenge,	4);
 	memcpy(deriv + 12,	gp_session->host_challenge + 4,	4);
 
-	if (sm_encrypt_des_ecb3(key, deriv, 16, &out, &out_len))   {
+	if (sm_encrypt_des_ecb3(ctx, key, deriv, 16, &out, &out_len))   {
 		if (ctx)
 			sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "SM GP get session key: des_ecb3 encryption error");
-		free(out);
 		return NULL;
 	}
 	else if (out==NULL  || out_len!=16)   {
@@ -124,12 +123,12 @@ sc_gp_get_session_key(struct sc_context *ctx, struct sm_gp_session *gp_session,
 
 
 int
-sm_gp_get_cryptogram(unsigned char *session_key,
+sm_gp_get_cryptogram(struct sc_context *ctx, unsigned char *session_key,
 		unsigned char *left, unsigned char *right,
 		unsigned char *out, int out_len)
 {
 	unsigned char block[24];
-	DES_cblock cksum={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+	sm_des_cblock cksum={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
 
 	if (out_len!=8)
 		return SC_ERROR_INVALID_ARGUMENTS;
@@ -138,7 +137,7 @@ sm_gp_get_cryptogram(unsigned char *session_key,
 	memcpy(block + 8, right, 8);
 	memcpy(block + 16, "\x80\0\0\0\0\0\0\0",8);
 
-	DES_cbc_cksum_3des(block,&cksum, sizeof(block), session_key, &cksum);
+	DES_cbc_cksum_3des(ctx, block, &cksum, sizeof(block), session_key, &cksum);
 
 	memcpy(out, cksum, 8);
 
@@ -147,8 +146,8 @@ sm_gp_get_cryptogram(unsigned char *session_key,
 
 
 int
-sm_gp_get_mac(unsigned char *key, DES_cblock *icv,
-		unsigned char *in, int in_len, DES_cblock *out)
+sm_gp_get_mac(struct sc_context *ctx, unsigned char *key, sm_des_cblock *icv,
+		unsigned char *in, int in_len, sm_des_cblock *out)
 {
 	int len;
 	unsigned char *block;
@@ -162,7 +161,7 @@ sm_gp_get_mac(unsigned char *key, DES_cblock *icv,
 	len = in_len + 8;
 	len -= (len%8);
 
-	DES_cbc_cksum_3des(block, out, len, key, icv);
+	DES_cbc_cksum_3des(ctx, block, out, len, key, icv);
 
 	free(block);
 	return 0;
@@ -212,7 +211,7 @@ sm_gp_init_session(struct sc_context *ctx, struct sm_gp_session *gp_session,
 	sc_debug(ctx, SC_LOG_DEBUG_SM, "SM GP init session: session KEK: %s", sc_dump_hex(gp_session->session_kek, 16));
 
 	memset(cksum, 0, sizeof(cksum));
-	rv = sm_gp_get_cryptogram(gp_session->session_enc, gp_session->host_challenge, gp_session->card_challenge, cksum, sizeof(cksum));
+	rv = sm_gp_get_cryptogram(ctx, gp_session->session_enc, gp_session->host_challenge, gp_session->card_challenge, cksum, sizeof(cksum));
 	LOG_TEST_RET(ctx, rv, "SM GP init session: cannot get cryptogram");
 
 	sc_debug(ctx, SC_LOG_DEBUG_SM, "SM GP init session: cryptogram: %s", sc_dump_hex(cksum, 8));
@@ -244,7 +243,7 @@ sm_gp_external_authentication(struct sc_context *ctx, struct sm_info *sm_info,
 	struct sc_apdu *apdu = NULL;
 	unsigned char host_cryptogram[8], raw_apdu[SC_MAX_APDU_BUFFER_SIZE];
 	struct sm_gp_session *gp_session = &sm_info->session.gp;
-	DES_cblock mac;
+	sm_des_cblock mac;
 	int rv, offs = 0;
 
 	LOG_FUNC_CALLED(ctx);
@@ -265,7 +264,7 @@ sm_gp_external_authentication(struct sc_context *ctx, struct sm_info *sm_info,
 	rv = sm_gp_init_session(ctx, gp_session, init_data + 20, 8);
 	LOG_TEST_RET(ctx, rv, "SM GP authentication: init session error");
 
-	rv = sm_gp_get_cryptogram(gp_session->session_enc,
+	rv = sm_gp_get_cryptogram(ctx, gp_session->session_enc,
 			gp_session->card_challenge, gp_session->host_challenge,
 			host_cryptogram, sizeof(host_cryptogram));
 	LOG_TEST_RET(ctx, rv, "SM GP authentication: get host cryptogram error");
@@ -287,7 +286,7 @@ sm_gp_external_authentication(struct sc_context *ctx, struct sm_info *sm_info,
 
 	memcpy(raw_apdu + offs, host_cryptogram, 8);
 	offs += 8;
-	rv = sm_gp_get_mac(gp_session->session_mac, &gp_session->mac_icv, raw_apdu, offs, &mac);
+	rv = sm_gp_get_mac(ctx, gp_session->session_mac, &gp_session->mac_icv, raw_apdu, offs, &mac);
 	LOG_TEST_RET(ctx, rv, "SM GP authentication: get MAC error");
 
 	memcpy(new_rapdu->sbuf, host_cryptogram, 8);
@@ -303,7 +302,8 @@ sm_gp_encrypt_command_data(struct sc_context *ctx, unsigned char *session_key,
 		const unsigned char *in, size_t in_len, unsigned char **out, size_t *out_len)
 {
 	unsigned char *data = NULL;
-	int rv, len;
+	int rv;
+	size_t len;
 
 	if (!out || !out_len)
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "SM GP encrypt command data error");
@@ -318,7 +318,7 @@ sm_gp_encrypt_command_data(struct sc_context *ctx, unsigned char *session_key,
 	}
 
 	len = in_len + 8;
-	len -= (len%8);
+	len -= (len % 8);
 
 	data = calloc(1, len);
 	if (!data)
@@ -344,7 +344,7 @@ sm_gp_securize_apdu(struct sc_context *ctx, struct sm_info *sm_info,
 	struct sm_gp_session *gp_session = &sm_info->session.gp;
 	unsigned gp_level = sm_info->session.gp.params.level;
 	unsigned gp_index = sm_info->session.gp.params.index;
-	DES_cblock mac;
+	sm_des_cblock mac;
 	unsigned char *encrypted = NULL;
 	size_t encrypted_len = 0;
 	int rv;
@@ -392,7 +392,7 @@ sm_gp_securize_apdu(struct sc_context *ctx, struct sm_info *sm_info,
 
 	memcpy(buff + 5, apdu_data, apdu->datalen);
 
-	rv = sm_gp_get_mac(gp_session->session_mac, &gp_session->mac_icv, buff, 5 + apdu->datalen, &mac);
+	rv = sm_gp_get_mac(ctx, gp_session->session_mac, &gp_session->mac_icv, buff, 5 + (int)apdu->datalen, &mac);
 	LOG_TEST_GOTO_ERR(ctx, rv, "SM GP securize APDU: get MAC error");
 
 	if (gp_level == SM_GP_SECURITY_MAC)   {

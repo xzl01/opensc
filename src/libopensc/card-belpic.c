@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /*     About the Belpic (Belgian Personal Identity Card) card
@@ -111,7 +111,7 @@ static long t1, t2, tot_read = 0, tot_dur = 0, dur;
 /* Data in the return value for the GET CARD DATA command:
  * All fields are one byte, except when noted otherwise.
  *
- * See ง6.9 in
+ * See ยง6.9 in
  * https://github.com/Fedict/eid-mw/blob/master/doc/sdk/documentation/Public_Belpic_Applet_v1%207_Ref_Manual%20-%20A01.pdf
  * for the full documentation on the GET CARD DATA command.
  */
@@ -146,6 +146,8 @@ static long t1, t2, tot_read = 0, tot_dur = 0, dur;
 static size_t next_idx = (size_t)-1;
 
 static const struct sc_atr_table belpic_atrs[] = {
+	/* Applet V1.8 */
+	{ "3B:7F:96:00:00:80:31:80:65:B0:85:04:01:20:12:0F:FF:82:90:00", NULL, NULL, SC_CARD_TYPE_BELPIC_EID, 0, NULL },
 	/* Applet V1.1 */
 	{ "3B:98:13:40:0A:A5:03:01:01:01:AD:13:11", NULL, NULL, SC_CARD_TYPE_BELPIC_EID, 0, NULL },
 	/* Applet V1.0 with new EMV-compatible ATR */
@@ -193,7 +195,7 @@ static int get_carddata(sc_card_t *card, u8* carddata_loc, unsigned int carddata
 		return r;
 	}
 	if(apdu.resplen < carddataloc_len) {
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			 "GetCardData: card returned %"SC_FORMAT_LEN_SIZE_T"u bytes rather than expected %d\n",
 			 apdu.resplen, carddataloc_len);
 		return SC_ERROR_WRONG_LENGTH;
@@ -249,7 +251,8 @@ static int belpic_select_file(sc_card_t *card,
 {
 	sc_apdu_t apdu;
 	u8 pathbuf[SC_MAX_PATH_SIZE], *path = pathbuf;
-	int r, pathlen;
+	int r;
+	size_t pathlen;
 	sc_file_t *file = NULL;
 
 	assert(card != NULL && in_path != NULL);
@@ -294,7 +297,7 @@ static int belpic_select_file(sc_card_t *card,
 }
 
 static int belpic_read_binary(sc_card_t *card,
-			      unsigned int idx, u8 * buf, size_t count, unsigned long flags)
+			      unsigned int idx, u8 * buf, size_t count, unsigned long *flags)
 {
 	int r;
 
@@ -338,7 +341,7 @@ static int belpic_set_security_env(sc_card_t *card,
 	u8 sbuf[SC_MAX_APDU_BUFFER_SIZE];
 	int r;
 
-	sc_log(card->ctx,  "belpic_set_security_env(), keyRef = 0x%0x, algo = 0x%0x\n",
+	sc_log(card->ctx,  "belpic_set_security_env(), keyRef = 0x%0x, algo = 0x%0lx\n",
 		 *env->key_ref, env->algorithm_flags);
 
 	assert(card != NULL && env != NULL);
@@ -349,14 +352,14 @@ static int belpic_set_security_env(sc_card_t *card,
 		apdu.p2 = 0xB6;
 		sbuf[0] = 0x04;	/* length of the following data */
 		sbuf[1] = 0x80;	/* tag for algorithm reference */
-		if (env->algorithm_flags & SC_ALGORITHM_RSA_PAD_PKCS1)
+		if (env->algorithm_flags & SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01)
 			sbuf[2] = 0x01;
 		else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA1)
 			sbuf[2] = 0x02;
 		else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_MD5)
 			sbuf[2] = 0x04;
 		else {
-			sc_log(card->ctx,  "Set Sec Env: unsupported algo 0X%0X\n",
+			sc_log(card->ctx,  "Set Sec Env: unsupported algo 0X%0lX\n",
 				 env->algorithm_flags);
 			return SC_ERROR_INVALID_ARGUMENTS;
 		}

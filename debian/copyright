@@ -14,7 +14,6 @@ Files: src/libopensc/authentic.h
  src/libopensc/iasecc-sm.c
  src/libopensc/iasecc.h
  src/libopensc/sm.h
- src/libsm/sm-common.c
  src/smm/sm-card-authentic.c
  src/smm/sm-card-iasecc.c
  src/smm/sm-cwa14890.c
@@ -24,16 +23,14 @@ Files: src/libopensc/authentic.h
 Copyright: 2010, Viktor Tarasov <vtarasov@opentrust.com>
 License: LGPL-2.1+
 
-Files: src/libopensc/card-gpk.c
+Files:
  src/libopensc/card-openpgp.c
- src/libopensc/cardctl.h
  src/libopensc/ctbcs.c
  src/libopensc/pkcs15-algo.c
  src/libopensc/pkcs15-openpgp.c
  src/libopensc/pkcs15-syn.c
  src/libopensc/reader-openct.c
  src/pkcs11/debug.c
- src/pkcs15init/pkcs15-gpk.c
  src/pkcs15init/pkcs15-lib.c
  src/pkcs15init/profile.c
  src/tools/pkcs11-tool.c
@@ -46,12 +43,21 @@ Files: src/libopensc/card-gpk.c
 Copyright: 2001-2003, Olaf Kirch <okir@lst.de>
 License: LGPL-2.1+
 
+Files: src/libopensc/cardctl.h
+Copyright: 2003  Olaf Kirch <okir@lse.de>
+ 2018-2019 GSMK - Gesellschaft für Sichere Mobile Kommunikation mbH
+License: LGPL-2.1+
+
 Files: src/libopensc/card-dnie.c
  src/libopensc/cwa-dnie.c
  src/libopensc/cwa14890.c
  src/libopensc/cwa14890.h
  src/tools/dnie-tool.c
 Copyright: 2010-2011, Juan Antonio Martinez <jonsito@terra.es>
+License: LGPL-2.1+
+
+Files: src/libopensc/card-dtrust.c
+Copyright: (C) 2023 Mario Haustein <mario.haustein@hrz.tu-chemnitz.de>
 License: LGPL-2.1+
 
 Files: src/pkcs11/framework-pkcs15.c
@@ -62,6 +68,32 @@ Files: src/pkcs11/framework-pkcs15.c
  src/pkcs11/pkcs11-session.c
  src/pkcs11/sc-pkcs11.h
 Copyright: 2001-2002, Timo Teräs <timo.teras@iki.fi>
+License: LGPL-2.1+
+
+Files: src/libopensc/pkcs15-emulator-filter.*
+ src/tests/fuzzing/fuzz_card.c
+ src/tests/fuzzing/fuzzer.c
+ src/tests/fuzzing/fuzzer_tool.*
+ src/tests/fuzzing/fuzz_piv_tool.c
+ src/tests/fuzzing/fuzz_pkcs11.c
+ src/tests/fuzzing/fuzz_pkcs15_crypt.c
+ src/tests/fuzzing/fuzz_pkcs15_encode.c
+ src/tests/fuzzing/fuzz_pkcs15_tool.c
+ src/tests/fuzzing/fuzz_pkcs15init.c
+ src/tests/fuzzing/fuzz_scconf_parse_string.c
+ src/tests/p11test/p11test_case_secret.*
+ src/tests/p11test/p11test_case_wrap.*
+ src/tests/unittests/decode_ecdsa_signature.c
+ src/tests/unittests/pkcs15-emulator-filter.c
+Copyright: 2021-2022 Red Hat, Inc.
+License: LGPL-2.1+
+
+Files: src/tests/unittests/hextobin.c
+Copyright: 2022 Peter Popovec <popovec.peter@gmail.com>
+License: LGPL-2.1+
+
+Files: src/tests/unittests/openpgp-tool.c
+Copyright: 2021  Vincent Pelletier <plr.vincent@gmail.com>
 License: LGPL-2.1+
 
 Files: src/scconf/*
@@ -84,8 +116,6 @@ Files: src/libopensc/card-muscle.c
  src/libopensc/muscle.h
  src/libopensc/compression.c
  src/libopensc/compression.h
- src/libopensc/p15card-helper.c
- src/libopensc/p15card-helper.h
  src/pkcs15init/pkcs15-muscle.c
 Copyright: 2006, Identity Alliance, Thomas Harning <support@identityalliance.com>
 License: LGPL-2.1+
@@ -99,10 +129,8 @@ Files: src/tests/lottery.c
 Copyright:  2001-2002, Juha Yrjölä <juha.yrjola@iki.fi>
 License: LGPL-2.1+
 
-Files: src/libopensc/card-westcos.c
- src/libopensc/pkcs15-westcos.c
+Files:
  src/minidriver/minidriver.c
- src/pkcs15init/pkcs15-westcos.c
  src/tools/westcos-tool.c
 Copyright: 2009-2010, francois.leblanc@cev-sa.com
 License: LGPL-2.1+
@@ -117,7 +145,10 @@ Files: src/libopensc/ef-atr.c
  src/pkcs15init/pkcs15-authentic.c
  src/pkcs15init/pkcs15-iasecc.c
 Copyright: 2001-2002, Juha Yrjölä <juha.yrjola@iki.fi>
-  2010, Viktor Tarasov <vtarasov@opentrust.com>
+ 2010, 2016 Viktor Tarasov <vtarasov@opentrust.com>
+ 2004, Bud P. Bruegger <bud@comune.grosseto.it>
+ 2004, Antonino Iacono <ant_iacono@tin.it>
+ 2003, Olaf Kirch <okir@suse.de>
 License: LGPL-2.1+
 
 Files: src/pkcs11/pkcs11-display.c
@@ -210,10 +241,6 @@ Files: src/libopensc/apdu.c
 Copyright: 2005, Nils Larsch <nils@larsch.net>
 License: LGPL-2.1+
 
-Files: src/libsm/sm-common.h
-Copyright: 2013, Viktor Tarasov <viktor.tarasov@gmail.com>
-License: LGPL-2.1+
-
 Files: src/libopensc/card-epass2003.c
  src/pkcs15init/pkcs15-epass2003.c
 Copyright: 2008, 2011 Weitao Sun <weitao@ftsafe.com>
@@ -279,6 +306,10 @@ Files: src/libopensc/pace.h
 Copyright: 2012, Frank Morgner <morgner@informatik.hu-berlin.de>
 License: LGPL-2.1+
 
+Files: src/tests/fuzzing/fuzzer_reader.*
+Copyright: 2019 Frank Morgner <frankmorgner@gmail.com>
+License: LGPL-2.1+
+
 Files: src/libopensc/pkcs15-dnie.c
 Copyright: 2011, Andre Zepezauer <andre.zepezauer@student.uni-halle.de>
   2011, Juan Antonio Martinez <jonsito@terra.es>
@@ -323,21 +354,9 @@ Copyright: 2001, Juha Yrjölä <juha.yrjola@iki.fi>
   2005, Nils Larsch <nils@larsch.net>
 License: LGPL-2.1+
 
-Files: src/libopensc/card-incrypto34.c
-Copyright: 2001, Juha Yrjölä <juha.yrjola@iki.fi>
-  2002, Andreas Jellinghaus <aj@dungeon.inka.de>
-  2005, ST Incard srl, Giuseppe Amato <giuseppe.amato@st.com>, <midori3@gmail.com>
-License: LGPL-2.1+
-
 Files: src/libopensc/card-sc-hsm.c
 Copyright: 2012, Andreas Schwier, CardContact, Minden, Germany, and others
-License: LGPL-2.1+
-
-Files: src/libopensc/pkcs15-esteid.c
-Copyright: 2003, Olaf Kirch <okir@suse.de>
-  2004, Antonino Iacono <ant_iacono@tin.it>
-  2004, Bud P. Bruegger <bud@comune.grosseto.it>
-  2004, Martin Paljak <martin@martinpaljak.net>
+ 2018-2019 GSMK - Gesellschaft für Sichere Mobile Kommunikation mbH
 License: LGPL-2.1+
 
 Files: src/libopensc/cards.h
@@ -350,21 +369,8 @@ Copyright: 2001-2002, Juha Yrjölä <juha.yrjola@iki.fi>
   2005, Zetes
 License: LGPL-2.1+
 
-Files: src/libopensc/card-jcop.c
-Copyright: 2003, Chaskiel Grundman <cg2v@andrew.cmu.edu>
-License: LGPL-2.1+
-
-Files: src/pkcs15init/pkcs15-jcop.c
-Copyright: 2002, Olaf Kirch <okir@lst.de>
-  2003, Chaskiel Grundman <cg2v@andrew.cmu.edu>
-License: LGPL-2.1+
-
 Files: src/libopensc/pkcs15-data.c
 Copyright: 2002, Danny De Cock <daniel.decock@postbox.be>
-License: LGPL-2.1+
-
-Files: src/libopensc/pkcs15-gemsafeGPK.c
-Copyright: 2005, Douglas E. Engert <deengert@anl.gov>
 License: LGPL-2.1+
 
 Files: src/libopensc/card-piv.c
@@ -435,6 +441,7 @@ License: LGPL-2.1+
 Files: src/tools/sc-hsm-tool.c
 Copyright: 2001, Juha Yrjölä <juha.yrjola@iki.fi>
   2012, www.CardContact.de, Andreas Schwier, Minden, Germany
+  2018-2019 GSMK - Gesellschaft für Sichere Mobile Kommunikation mbH
 License: LGPL-2.1+
 
 Files: src/libopensc/card-starcos.c
@@ -456,13 +463,11 @@ Copyright: 2004, Nils Larsch <larsch@trustcenter.de>
 License: LGPL-2.1+
 
 Files: src/pkcs15init/pkcs15-cardos.c
-Copyright: 2002, Olaf Kirch <okir@lst.de>
-  2005, Nils Larsch <nils@larsch.net>
-License: LGPL-2.1+
-
-Files: src/pkcs15init/pkcs15-incrypto34.c
-Copyright: 2002, Olaf Kirch <okir@lst.de>
-  2005, ST Incard srl, Giuseppe Amato <giuseppe.amato@st.com>
+Copyright: 2003, Olaf Kirch <okir@lst.de>
+ 2020, Douglas E. Engert <DEEngert@gmail.com>
+ 2016, Viktor Tarasov <viktor.tarasov@gmail.com>
+ 2004, Bud P. Bruegger <bud@comune.grosseto.it>
+ 2004, Antonino Iacono <ant_iacono@tin.it>
 License: LGPL-2.1+
 
 Files: src/tools/util.c
@@ -473,16 +478,17 @@ Files: src/libopensc/pkcs15-tcos.c
 Copyright: 2005, 2011, Peter Koch <pk@opensc-project.org>
 License: LGPL-2.1+
 
-Files: src/tools/openpgp-tool.c
+Files: src/tools/openpgp-tool*
 Copyright: 2012, Peter Marschall <peter@adpm.de>
-License: LGPL-2.1+
-
-Files: src/libopensc/card-akis.c
-Copyright: 2007, TUBITAK / UEKAE <bilgi@pardus.org.tr>
 License: LGPL-2.1+
 
 Files: src/libopensc/card-iasecc.c
 Copyright: 2010, Viktor Tarasov <vtarasov@gmail.com>
+License: LGPL-2.1+
+
+Files: src/libopensc/card-nqApplet.*
+ src/libopensc/pkcs15-starcos-esign.c
+Copyright: 2021 jozsefd <jozsef.dojcsak@gmail.com>
 License: LGPL-2.1+
 
 Files: src/pkcs15init/pkcs15-setcos.c

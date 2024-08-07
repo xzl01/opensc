@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -172,7 +172,7 @@ static int epass2003_pkcs15_create_dir(struct sc_profile *profile,
 
 		for (i = 0; create_efs[i]; ++i) {
 			if (sc_profile_get_file(profile, create_efs[i], &file)) {
-				sc_log(card->ctx, 
+				sc_log(card->ctx,
 					 "Inconsistent profile: cannot find %s",
 					 create_efs[i]);
 				SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE,
@@ -298,6 +298,8 @@ static int epass2003_pkcs15_key_reference(struct sc_profile *profile,
 					  struct sc_pkcs15_prkey_info *prkey)
 {
 	SC_FUNC_CALLED(p15card->card->ctx, SC_LOG_DEBUG_VERBOSE);
+	if (prkey->path.len == 0)
+		SC_FUNC_RETURN(p15card->card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_INVALID_ARGUMENTS);
 	prkey->key_reference = prkey->path.value[prkey->path.len - 1];
 	SC_FUNC_RETURN(p15card->card->ctx, SC_LOG_DEBUG_VERBOSE, SC_SUCCESS);
 }
@@ -307,7 +309,7 @@ static int
 cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 	      unsigned int type, unsigned int num, struct sc_file **out)
 {
-	struct sc_file *file;
+	struct sc_file *file = NULL;
 	const char *_template = NULL, *desc = NULL;
 	unsigned int structure = 0xFFFFFFFF;
 
@@ -317,12 +319,12 @@ cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 	while (1) {
 		switch (type) {
 		case SC_PKCS15_TYPE_PRKEY_EC:
-			desc = "RSA private key";
+			desc = "EC private key";
 			_template = "private-key";
 			structure = SC_CARDCTL_OBERTHUR_KEY_EC_CRT;
 			break;
 		case SC_PKCS15_TYPE_PUBKEY_EC:
-			desc = "RSA public key";
+			desc = "EC public key";
 			_template = "public-key";
 			structure = SC_CARDCTL_OBERTHUR_KEY_EC_PUBLIC;
 			break;
@@ -335,10 +337,6 @@ cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 			desc = "RSA public key";
 			_template = "public-key";
 			structure = SC_CARDCTL_OBERTHUR_KEY_RSA_PUBLIC;
-			break;
-		case SC_PKCS15_TYPE_PUBKEY_DSA:
-			desc = "DSA public key";
-			_template = "public-key";
 			break;
 		case SC_PKCS15_TYPE_PRKEY:
 			desc = "extractable private key";
@@ -360,7 +358,7 @@ cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 		 * the generic class (SC_PKCS15_TYPE_CERT)
 		 */
 		if (!(type & ~SC_PKCS15_TYPE_CLASS_MASK)) {
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 				 "File type %X not supported by card driver",
 				 type);
 			return SC_ERROR_INVALID_ARGUMENTS;
@@ -371,10 +369,15 @@ cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 	sc_log(card->ctx,  "template %s; num %i\n",
 		 _template, num);
 	if (sc_profile_get_file(profile, _template, &file) < 0) {
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			 "Profile doesn't define %s template '%s'\n", desc,
 			 _template);
 		return SC_ERROR_NOT_SUPPORTED;
+	}
+
+	if (file->path.len < 1) {
+		sc_file_free(file);
+		return SC_ERROR_INTERNAL;
 	}
 
 	file->id &= 0xFF00;
@@ -384,7 +387,7 @@ cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 	file->type = SC_FILE_TYPE_INTERNAL_EF;
 	file->ef_structure = structure;
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "file size %"SC_FORMAT_LEN_SIZE_T"u; ef type %i/%i; id %04X, path_len %"SC_FORMAT_LEN_SIZE_T"u\n",
 		 file->size, file->type, file->ef_structure, file->id,
 		 file->path.len);
@@ -424,7 +427,7 @@ static int epass2003_pkcs15_store_key(struct sc_profile *profile,
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "index %"SC_FORMAT_LEN_SIZE_T"u; id %s\n", idx,
 		 sc_pkcs15_print_id(&key_info->id));
 	if (key->algorithm != SC_ALGORITHM_RSA
@@ -433,7 +436,7 @@ static int epass2003_pkcs15_store_key(struct sc_profile *profile,
 			    SC_ERROR_NOT_SUPPORTED,
 			    "store key: only support RSA");
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "store key: with ID:%s and path:%s",
 		 sc_pkcs15_print_id(&key_info->id),
 		 sc_print_path(&key_info->path));
@@ -454,7 +457,7 @@ static int epass2003_pkcs15_store_key(struct sc_profile *profile,
 	LOG_TEST_RET(card->ctx, r,
 		    "create key: failed to create key file");
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "index %"SC_FORMAT_LEN_SIZE_T"u; keybits %"SC_FORMAT_LEN_SIZE_T"u\n",
 		 idx, keybits);
 	if (keybits < 1024 || keybits > 2048 || (keybits % 0x20)) {
@@ -502,7 +505,7 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 	sc_epass2003_gen_key_data gendat;
 	struct sc_pkcs15_prkey_info *key_info =
 	    (struct sc_pkcs15_prkey_info *)obj->data;
-	size_t idx = key_info->key_reference;
+	int idx = key_info->key_reference;
 	size_t keybits = key_info->modulus_length;
 	struct sc_file *tfile = NULL, *pukf = NULL;
 	struct sc_path path;
@@ -538,8 +541,8 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 	SC_TEST_GOTO_ERR(card->ctx, SC_LOG_DEBUG_VERBOSE, r,
 		    "create key: failed to create key file");
 
-	sc_log(card->ctx, 
-		 "index %"SC_FORMAT_LEN_SIZE_T"u; keybits %"SC_FORMAT_LEN_SIZE_T"u\n",
+	sc_log(card->ctx,
+		 "index %u; keybits %"SC_FORMAT_LEN_SIZE_T"u\n",
 		 idx, keybits);
 	if (keybits < 1024 || keybits > 2048 || (keybits % 0x20)) {
 		if(obj->type == SC_PKCS15_TYPE_PRKEY_EC && keybits == 256)
@@ -575,17 +578,15 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 
 	if (obj->type != SC_PKCS15_TYPE_PRKEY_RSA )
 	{
-	
 		r = cosm_new_file(profile, card, SC_PKCS15_TYPE_PUBKEY_EC, idx, &pukf);
 	}
 	else
 	{
-		
 		r = cosm_new_file(profile, card, SC_PKCS15_TYPE_PUBKEY_RSA, idx, &pukf);
 	}
 
 	if (r < 0) {
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			 "generate key: create temporary pukf failed\n");
 		goto err;
 	}
@@ -594,7 +595,7 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 	pukf->id = pukf->path.value[pukf->path.len - 2] * 0x100
 	    + pukf->path.value[pukf->path.len - 1];
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "public key size %"SC_FORMAT_LEN_SIZE_T"u; ef type %i/%i; id %04X; path: %s",
 		 pukf->size, pukf->type, pukf->ef_structure, pukf->id,
 		 sc_print_path(&pukf->path));
@@ -609,7 +610,7 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 
 		r = sc_pkcs15init_delete_by_path(profile, p15card, &pukf->path);
 		if (r != SC_SUCCESS) {
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 				 "generate key: failed to delete existing key file\n");
 			goto err;
 		}
@@ -617,7 +618,7 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 	/* create */
 	r = sc_pkcs15init_create_file(profile, p15card, pukf);
 	if (r != SC_SUCCESS) {
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			 "generate key: pukf create file failed\n");
 		goto err;
 	}
@@ -635,10 +636,11 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 	gendat.pukey_id = pukf->id;
 	gendat.key_length = keybits;
 	gendat.modulus = NULL;
+	gendat.modulus_len = 0;
 	r = sc_card_ctl(card, SC_CARDCTL_ENTERSAFE_GENERATE_KEY, &gendat);
 	SC_TEST_GOTO_ERR(card->ctx, SC_LOG_DEBUG_VERBOSE, r,
 		    "generate RSA key pair failed");
-	
+
 	if (!gendat.modulus) {
 		r = SC_ERROR_OUT_OF_MEMORY;
 		goto err;
@@ -666,26 +668,27 @@ static int epass2003_pkcs15_generate_key(struct sc_profile *profile,
 		pubkey->algorithm = SC_ALGORITHM_RSA;
 	}
 	else if(pubkey && (obj->type == SC_PKCS15_TYPE_PRKEY_EC)){
-		struct sc_ec_parameters *ecparams = (struct	
+		struct sc_ec_parameters *ecparams = (struct
 				sc_ec_parameters *)key_info->params.data;
-		pubkey->algorithm = SC_ALGORITHM_EC; 
-		pubkey->u.ec.ecpointQ.value = (u8 *) malloc(65);
+		pubkey->algorithm = SC_ALGORITHM_EC;
+		pubkey->u.ec.ecpointQ.value = (u8 *)malloc(gendat.modulus_len + 1);
 		if (!pubkey->u.ec.ecpointQ.value) {
 			r = SC_ERROR_OUT_OF_MEMORY;
 			goto err;
 		}
 
 		pubkey->u.ec.ecpointQ.value[0] = 0x04;
-		memcpy(&pubkey->u.ec.ecpointQ.value[1], gendat.modulus, 64);
-		pubkey->u.ec.ecpointQ.len = 65;
+		memcpy(&pubkey->u.ec.ecpointQ.value[1], gendat.modulus, gendat.modulus_len);
+		pubkey->u.ec.ecpointQ.len = gendat.modulus_len + 1;
+		free(gendat.modulus);
 
 		free(pubkey->u.ec.params.named_curve);
-		pubkey->u.ec.params.named_curve = NULL; 
+		pubkey->u.ec.params.named_curve = NULL;
 
 		free(pubkey->u.ec.params.der.value);
 		pubkey->u.ec.params.der.value = NULL;
 		pubkey->u.ec.params.der.len = 0;
-		pubkey->u.ec.params.named_curve = strdup(ecparams->named_curve); 
+		pubkey->u.ec.params.named_curve = strdup(ecparams->named_curve);
 
 		if (!pubkey->u.ec.params.named_curve){
 			r = SC_ERROR_OUT_OF_MEMORY;
@@ -702,7 +705,7 @@ err:
 	sc_file_free(pukf);
 	sc_file_free(file);
 	sc_file_free(tfile);
-	
+
 	if(r < 0 && pubkey->u.ec.ecpointQ.value)
 	{
 		free(pubkey->u.ec.ecpointQ.value);
@@ -726,13 +729,13 @@ static int epass2003_pkcs15_sanity_check(sc_profile_t * profile,
 					 sc_pkcs15_card_t * p15card)
 {
 	struct sc_context *ctx = p15card->card->ctx;
-	struct sc_pkcs15_auth_info profile_auth;
+	struct sc_pkcs15_auth_info profile_auth = {0};
 	struct sc_pkcs15_object *objs[32];
 	int rv, nn, ii, update_df = 0;
 
 	SC_FUNC_CALLED(ctx, SC_LOG_DEBUG_VERBOSE);
 
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "Check and if needed update PinFlags");
 	rv = sc_pkcs15_get_objects(p15card, SC_PKCS15_TYPE_AUTH_PIN, objs, 32);
 	LOG_TEST_RET(ctx, rv, "Failed to get PINs");
@@ -751,7 +754,7 @@ static int epass2003_pkcs15_sanity_check(sc_profile_t * profile,
 
 		if (pin_attrs->reference == profile_auth.attrs.pin.reference
 		    && pin_attrs->flags != profile_auth.attrs.pin.flags) {
-			sc_log(ctx, 
+			sc_log(ctx,
 				 "Set flags of '%s'(flags:%X,ref:%i,id:%s) to %X",
 				 objs[ii]->label, pin_attrs->flags,
 				 pin_attrs->reference,

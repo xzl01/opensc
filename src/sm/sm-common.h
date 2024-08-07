@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _SM_COMMON_H
@@ -30,12 +30,15 @@ extern "C" {
 
 #include "libopensc/sm.h"
 
-DES_LONG DES_cbc_cksum_3des(const unsigned char *in, DES_cblock *output, long length,
-		unsigned char *key, const_DES_cblock *ivec);
-DES_LONG DES_cbc_cksum_3des_emv96(const unsigned char *in, DES_cblock *output,
+unsigned int DES_cbc_cksum_3des(struct sc_context *ctx,
+		const unsigned char *in, sm_des_cblock *output, long length,
+		unsigned char *key, sm_const_des_cblock *ivec);
+unsigned int DES_cbc_cksum_3des_emv96(struct sc_context *ctx,
+		const unsigned char *in, sm_des_cblock *output,
 		long length, unsigned char *key,
-		const_DES_cblock *ivec);
-int sm_encrypt_des_ecb3(unsigned char *key, unsigned char *data, int data_len,
+		sm_const_des_cblock *ivec);
+int sm_encrypt_des_ecb3(struct sc_context *ctx,
+		unsigned char *key, unsigned char *data, int data_len,
 		unsigned char **out, int *out_len);
 int sm_encrypt_des_cbc3(struct sc_context *ctx, unsigned char *key,
 		const unsigned char *in, size_t in_len,

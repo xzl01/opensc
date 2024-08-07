@@ -15,14 +15,13 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,12 +85,14 @@ static int rtecp_init(sc_card_t *card)
 	sc_algorithm_info_t info;
 	unsigned long flags;
 
-	assert(card && card->ctx);
+	if (!card || !card->ctx)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	card->cla = 0;
 
 	if (card->type == SC_CARD_TYPE_RUTOKEN_LITE
 			|| card->type == SC_CARD_TYPE_RUTOKEN_LITE_SC)
-		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, 0);
+		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_SUCCESS);
 
 	card->caps |= SC_CARD_CAP_RNG;
 
@@ -106,6 +107,7 @@ static int rtecp_init(sc_card_t *card)
 	_sc_card_add_rsa_alg(card, 1536, flags, 0);
 	_sc_card_add_rsa_alg(card, 1792, flags, 0);
 	_sc_card_add_rsa_alg(card, 2048, flags, 0);
+	_sc_card_add_rsa_alg(card, 4096, flags, 0);
 
 	memset(&info, 0, sizeof(info));
 	info.algorithm = SC_ALGORITHM_GOSTR3410;
@@ -114,7 +116,7 @@ static int rtecp_init(sc_card_t *card)
 		| SC_ALGORITHM_GOSTR3410_HASH_NONE;
 	_sc_card_add_algorithm(card, &info);
 
-	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, 0);
+	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_SUCCESS);
 }
 
 static void reverse(unsigned char *buf, size_t len)
@@ -122,7 +124,9 @@ static void reverse(unsigned char *buf, size_t len)
 	unsigned char tmp;
 	size_t i;
 
-	assert(buf || len == 0);
+	if (!buf && len != 0)
+		return;
+
 	for (i = 0; i < len / 2; ++i)
 	{
 		tmp = buf[i];
@@ -164,16 +168,19 @@ static void set_acl_from_sec_attr(sc_card_t *card, sc_file_t *file)
 	unsigned int method;
 	unsigned long key_ref;
 
-	assert(card && card->ctx && file);
-	assert(file->sec_attr  &&  file->sec_attr_len == SC_RTECP_SEC_ATTR_SIZE);
-	assert(1 + 6 < SC_RTECP_SEC_ATTR_SIZE);
+	if (!card || !card->ctx || !file || !file->sec_attr
+		|| file->sec_attr_len != SC_RTECP_SEC_ATTR_SIZE
+		|| 1 + 6 >= SC_RTECP_SEC_ATTR_SIZE)
+	{
+		return;
+	}
 
 	sc_file_add_acl_entry(file, SC_AC_OP_SELECT, SC_AC_NONE, SC_AC_KEY_REF_NONE);
 	if (file->sec_attr[0] & 0x40) /* if AccessMode.6 */
 	{
 		method = sec_attr_to_method(file->sec_attr[1 + 6]);
 		key_ref = sec_attr_to_key_ref(file->sec_attr[1 + 6]);
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			"SC_AC_OP_DELETE %i %lu\n",
 			(int)method, key_ref);
 		sc_file_add_acl_entry(file, SC_AC_OP_DELETE, method, key_ref);
@@ -182,7 +189,7 @@ static void set_acl_from_sec_attr(sc_card_t *card, sc_file_t *file)
 	{
 		method = sec_attr_to_method(file->sec_attr[1 + 0]);
 		key_ref = sec_attr_to_key_ref(file->sec_attr[1 + 0]);
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			(file->type == SC_FILE_TYPE_DF) ?
 				"SC_AC_OP_CREATE %i %lu\n"
 				: "SC_AC_OP_READ %i %lu\n",
@@ -200,11 +207,11 @@ static void set_acl_from_sec_attr(sc_card_t *card, sc_file_t *file)
 		{
 			method = sec_attr_to_method(file->sec_attr[1 + 1]);
 			key_ref = sec_attr_to_key_ref(file->sec_attr[1 + 1]);
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 				"SC_AC_OP_UPDATE %i %lu\n",
 				(int)method, key_ref);
 			sc_file_add_acl_entry(file, SC_AC_OP_UPDATE, method, key_ref);
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 				"SC_AC_OP_WRITE %i %lu\n",
 				(int)method, key_ref);
 			sc_file_add_acl_entry(file, SC_AC_OP_WRITE, method, key_ref);
@@ -217,9 +224,9 @@ static int set_sec_attr_from_acl(sc_card_t *card, sc_file_t *file)
 	u8 sec_attr[SC_RTECP_SEC_ATTR_SIZE] = { 0 };
 	int r;
 
-	assert(card && card->ctx && file);
-	assert(!file->sec_attr  &&  file->sec_attr_len == 0);
-	assert(1 + 6 < sizeof(sec_attr));
+	if (!card || !card->ctx || !file
+		|| file->sec_attr || file->sec_attr_len != 0)
+		return SC_ERROR_INVALID_ARGUMENTS;
 
 	entry = sc_file_get_acl_entry(file, SC_AC_OP_DELETE);
 	if (entry)
@@ -321,7 +328,10 @@ static int rtecp_verify(sc_card_t *card, unsigned int type, int ref_qualifier,
 	int r, send_logout = 0;
 
 	(void)type; /* no warning */
-	assert(card && card->ctx && data);
+
+	if (!card || !card->ctx || !data)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	for (;;)
 	{
 		sc_format_apdu(card, &apdu, SC_APDU_CASE_3_SHORT,
@@ -357,7 +367,9 @@ static int rtecp_logout(sc_card_t *card)
 	sc_apdu_t apdu;
 	int r;
 
-	assert(card && card->ctx);
+	if (!card || !card->ctx)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_1, 0x40, 0, 0);
 	apdu.cla = 0x80;
 	r = sc_transmit_apdu(card, &apdu);
@@ -387,7 +399,9 @@ static int rtecp_cipher(sc_card_t *card, const u8 *data, size_t data_len,
 	size_t i;
 	int r;
 
-	assert(card && card->ctx && data && out);
+	if (!card || !card->ctx || !data || !out)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	buf_out = malloc(out_len + 2);
 	buf = malloc(data_len);
 	if (!buf || !buf_out)
@@ -414,11 +428,8 @@ static int rtecp_cipher(sc_card_t *card, const u8 *data, size_t data_len,
 		apdu.flags |= SC_APDU_FLAGS_CHAINING;
 	r = sc_transmit_apdu(card, &apdu);
 	if (!sign)
-	{
-		assert(buf);
 		sc_mem_clear(buf, data_len);
-	}
-	assert(buf);
+
 	free(buf);
 	if (r)
 		sc_log(card->ctx,  "APDU transmit failed: %s\n", sc_strerror(r));
@@ -426,7 +437,6 @@ static int rtecp_cipher(sc_card_t *card, const u8 *data, size_t data_len,
 	{
 		if (apdu.sw1 == 0x90 && apdu.sw2 == 0x00)
 		{
-			assert(buf_out);
 			for (i = 0; i < apdu.resplen; ++i)
 				out[i] = buf_out[apdu.resplen - 1 - i];
 			r = (i > 0) ? (int)i : SC_ERROR_INTERNAL;
@@ -435,11 +445,8 @@ static int rtecp_cipher(sc_card_t *card, const u8 *data, size_t data_len,
 			r = sc_check_sw(card, apdu.sw1, apdu.sw2);
 	}
 	if (!sign)
-	{
-		assert(buf_out);
 		sc_mem_clear(buf_out, out_len + 2);
-	}
-	assert(buf_out);
+
 	free(buf_out);
 	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 
@@ -450,7 +457,8 @@ static int rtecp_decipher(sc_card_t *card,
 {
 	int r;
 
-	assert(card && card->ctx && data && out);
+	if (!card || !card->ctx || !data || !out)
+		return SC_ERROR_INVALID_ARGUMENTS;
 
 	if (card->type == SC_CARD_TYPE_RUTOKEN_LITE
 			|| card->type == SC_CARD_TYPE_RUTOKEN_LITE_SC)
@@ -466,7 +474,8 @@ static int rtecp_compute_signature(sc_card_t *card,
 {
 	int r;
 
-	assert(card && card->ctx && data && out);
+	if (!card || !card->ctx || !data || !out)
+		return SC_ERROR_INVALID_ARGUMENTS;
 
 	if (card->type == SC_CARD_TYPE_RUTOKEN_LITE
 			|| card->type == SC_CARD_TYPE_RUTOKEN_LITE_SC)
@@ -482,12 +491,14 @@ static int rtecp_change_reference_data(sc_card_t *card, unsigned int type,
 		const u8 *newref, size_t newlen, int *tries_left)
 {
 	sc_apdu_t apdu;
-	u8 rsf_length[2], *buf, *buf_end, *p; 
-	size_t val_length, buf_length, max_transmit_length;
-	int transmits_num, r;
+	u8 rsf_length[2], *buf, *buf_end, *p;
+	size_t val_length, buf_length, max_transmit_length, transmits_num;
+	int r;
 
-	assert(card && card->ctx && newref);
-	sc_log(card->ctx, 
+	if (!card || !card->ctx || !newref)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
+	sc_log(card->ctx,
 		 "newlen = %"SC_FORMAT_LEN_SIZE_T"u\n", newlen);
 	if (newlen > 0xFFFF)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_ARGUMENTS);
@@ -496,31 +507,40 @@ static int rtecp_change_reference_data(sc_card_t *card, unsigned int type,
 		r = sc_verify(card, type, ref_qualifier, old, oldlen, tries_left);
 		LOG_TEST_RET(card->ctx, r, "Verify old pin failed");
 	}
-	
+
 	max_transmit_length = sc_get_max_send_size(card);
-	assert(max_transmit_length > 2);
+	if (max_transmit_length <= 2)
+		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	/*
 	 * (2 + sizeof(rsf_length) + newlen) - total length of data we need to transfer,
 	 * (max_transmit_length - 2) - amount of useful data we can transfer in one transmit (2 bytes for 0xA5 tag)
 	 */
 	transmits_num = (2 + sizeof(rsf_length) + newlen) / (max_transmit_length - 2) + 1;
 	/* buffer length = size of 0x80 TLV + size of RSF-file + (size of Tag and Length)*(number of APDUs) */
-	buf_length = (2 + sizeof(rsf_length)) + newlen + 2*(transmits_num); 
+	buf_length = (2 + sizeof(rsf_length)) + newlen + 2*(transmits_num);
 	p = buf = (u8 *)malloc(buf_length);
 	if (buf == NULL)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
-	buf_end = buf + buf_length; 
+	buf_end = buf + buf_length;
 
-	sc_format_apdu(card, &apdu, SC_APDU_CASE_3_SHORT, 0x24, 0x01, ref_qualifier);	
+	sc_format_apdu(card, &apdu, SC_APDU_CASE_3_SHORT, 0x24, 0x01, ref_qualifier);
 	/* put 0x80 TLV */
 	rsf_length[0] = (newlen >> 8) & 0xFF;
 	rsf_length[1] = newlen & 0xFF;
-	assert(buf_end - p >= (int)(2 + sizeof(rsf_length)));
+
+	if (buf_end - p < (int)(2 + sizeof(rsf_length))) {
+		free(buf);
+		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
+	}
+
 	sc_asn1_put_tag(0x80, rsf_length, sizeof(rsf_length), p, buf_end - p, &p);
 	/* put 0xA5 TLVs (one or more); each transmit must begin with 0xA5 TLV */
 	while (newlen)
 	{
-		assert(buf_end - p >= (int)(newlen + 2));
+		if (buf_end - p < (int)(newlen + 2)) {
+			free(buf);
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
+		}
 		if ((p - buf) % max_transmit_length + newlen + 2 > max_transmit_length)
 			val_length = max_transmit_length - (p - buf) % max_transmit_length - 2;
 		else
@@ -528,7 +548,10 @@ static int rtecp_change_reference_data(sc_card_t *card, unsigned int type,
 		/* not using sc_asn1_put_tag(...) because rtecp do not support asn1 properly (when val_length > 127) */
 		*p++ = 0xA5;
 		*p++ = (u8)val_length;
-		assert(val_length <= newlen);
+		if (val_length > newlen) {
+			free(buf);
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
+		}
 		memcpy(p, newref, val_length);
 		p += val_length;
 		newref += val_length;
@@ -556,14 +579,16 @@ static int rtecp_reset_retry_counter(sc_card_t *card, unsigned int type,
 	int r;
 
 	(void)type, (void)puk, (void)puklen; /* no warning */
-	assert(card && card->ctx);
+
+	if (!card || !card->ctx)
+		return SC_ERROR_INVALID_ARGUMENTS;
 
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_1, 0x2C, 0x03, ref_qualifier);
 	r = sc_transmit_apdu(card, &apdu);
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 	r = sc_check_sw(card, apdu.sw1, apdu.sw2);
 	LOG_TEST_RET(card->ctx, r, "Unblock card failed");
-	
+
 	if (newref && newlen)   {
         	u8 tmp[2], buf[SC_MAX_APDU_BUFFER_SIZE];
 		u8 *p = buf;
@@ -592,13 +617,15 @@ static int rtecp_create_file(sc_card_t *card, sc_file_t *file)
 {
 	int r;
 
-	assert(card && card->ctx && file);
+	if (!card || !card->ctx || !file)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	if (file->sec_attr_len == 0)
 	{
 		r = set_sec_attr_from_acl(card, file);
 		LOG_TEST_RET(card->ctx, r, "Set sec_attr from ACL failed");
 	}
-	assert(iso_ops && iso_ops->create_file);
+
 	r = iso_ops->create_file(card, file);
 	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 }
@@ -611,7 +638,9 @@ static int rtecp_list_files(sc_card_t *card, u8 *buf, size_t buflen)
 	size_t taglen, len = 0;
 	int r;
 
-	assert(card && card->ctx && buf);
+	if (!card || !card->ctx || !buf)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_2_SHORT, 0xA4, 0, 0);
 	for (;;)
 	{
@@ -664,18 +693,22 @@ static int rtecp_list_files(sc_card_t *card, u8 *buf, size_t buflen)
 		apdu.data = previd;
 		apdu.datalen = sizeof(previd);
 	}
-	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, len);
+	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, (int)len);
 }
 
 static int rtecp_card_ctl(sc_card_t *card, unsigned long request, void *data)
 {
 	sc_apdu_t apdu;
-	u8 buf[SC_MAX_APDU_BUFFER_SIZE];
+	u8 buf[512];
 	sc_rtecp_genkey_data_t *genkey_data = data;
 	sc_serial_number_t *serial = data;
 	int r;
 
-	assert(card && card->ctx);
+	const unsigned char rsa_prop[] = {0xA6, 0x06, 0x94, 0x04, 0x01, 0x00, 0x01, 0x00};
+
+	if (!card || !card->ctx)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	switch (request)
 	{
 	case SC_CARDCTL_RTECP_INIT:
@@ -703,6 +736,12 @@ static int rtecp_card_ctl(sc_card_t *card, unsigned long request, void *data)
 		apdu.resp = buf;
 		apdu.resplen = sizeof(buf);
 		apdu.le = 256;
+		if (genkey_data->type == SC_ALGORITHM_RSA) {
+			apdu.cse = SC_APDU_CASE_4_SHORT;
+			apdu.data = rsa_prop;
+			apdu.datalen = sizeof(rsa_prop);
+			apdu.lc = sizeof(rsa_prop);
+		}
 		break;
 	case SC_CARDCTL_LIFECYCLE_SET:
 		sc_log(card->ctx,  "%s\n",
@@ -710,7 +749,7 @@ static int rtecp_card_ctl(sc_card_t *card, unsigned long request, void *data)
 		/* no call sc_debug (SC_FUNC_RETURN) */
 		return SC_ERROR_NOT_SUPPORTED;
 	default:
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			"request = 0x%lx\n", request);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
 	}
@@ -741,7 +780,7 @@ static int rtecp_card_ctl(sc_card_t *card, unsigned long request, void *data)
 	}
 	else if (!r && request == SC_CARDCTL_GET_SERIALNR)
 	{
-		if (serial->len >= apdu.resplen)
+		if (apdu.resplen <= sizeof(serial->value))
 		{
 			memcpy(serial->value, apdu.resp, apdu.resplen);
 			serial->len = apdu.resplen;
@@ -757,8 +796,10 @@ static int rtecp_construct_fci(sc_card_t *card, const sc_file_t *file,
 {
 	u8 buf[64], *p = out;
 
-	assert(card && card->ctx && file && out && outlen);
-	assert(*outlen  >=  (size_t)(p - out) + 2);
+	if (!card || !card->ctx || !file || !out || !outlen
+		|| (*outlen < (size_t)(p - out) + 2))
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	*p++ = 0x6F; /* FCI template */
 	p++; /* for length */
 
@@ -770,7 +811,8 @@ static int rtecp_construct_fci(sc_card_t *card, const sc_file_t *file,
 	/* 0x82 - File descriptor byte */
 	if (file->type_attr_len)
 	{
-		assert(sizeof(buf) >= file->type_attr_len);
+		if (sizeof(buf) < file->type_attr_len)
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 		memcpy(buf, file->type_attr, file->type_attr_len);
 		sc_asn1_put_tag(0x82, buf, file->type_attr_len,
 				p, *outlen - (p - out), &p);
@@ -799,14 +841,16 @@ static int rtecp_construct_fci(sc_card_t *card, const sc_file_t *file,
 
 	if (file->prop_attr_len)
 	{
-		assert(sizeof(buf) >= file->prop_attr_len);
+		if (sizeof(buf) < file->prop_attr_len)
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 		memcpy(buf, file->prop_attr, file->prop_attr_len);
 		sc_asn1_put_tag(0x85, buf, file->prop_attr_len,
 				p, *outlen - (p - out), &p);
 	}
 	if (file->sec_attr_len)
 	{
-		assert(sizeof(buf) >= file->sec_attr_len);
+		if (sizeof(buf) < file->sec_attr_len)
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 		memcpy(buf, file->sec_attr, file->sec_attr_len);
 		sc_asn1_put_tag(0x86, buf, file->sec_attr_len,
 				p, *outlen - (p - out), &p);

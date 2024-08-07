@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -36,11 +36,19 @@
 #ifdef ENABLE_OPENSSL
 #include <openssl/des.h>
 #include <openssl/sha.h>
+#include <openssl/evp.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#include <openssl/provider.h>
+#endif
 #endif
 
 #include "libopensc/opensc.h"
 #include "libopensc/cards.h"
 #include "util.h"
+
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	static OSSL_PROVIDER *legacy_provider = NULL;
+#endif
 
 static const char *app_name = "cardos-tool";
 
@@ -68,7 +76,7 @@ static const char *option_help[] = {
 	"Change Startkey with given APDU command",
 	"Uses reader number <arg> [0]",
 	"Wait for a card to be inserted",
-	"Verbose operation. Use several times to enable debug output.",
+	"Verbose operation, may be used several times",
 };
 
 static sc_context_t *ctx = NULL;
@@ -190,6 +198,8 @@ static int cardos_info(void)
 	} else if (apdu.resp[0] == 0xc9 &&
 			(apdu.resp[1] == 0x02 || apdu.resp[1] == 0x03)) {
 		printf(" (that's CardOS V5.3)\n");
+	} else if (apdu.resp[0] == 0xc9 && apdu.resp[1] == 0x04) {
+		printf(" (that's CardOS V5.4)\n");
 	} else {
 		printf(" (unknown Version)\n");
 	}
@@ -393,9 +403,11 @@ static int cardos_sm4h(const unsigned char *in, size_t inlen, unsigned char
 	int plain_lc;	/* data size in orig APDU */
 	unsigned int mac_input_len, enc_input_len;
 	unsigned char *mac_input, *enc_input;
-	DES_key_schedule ks_a, ks_b;
-	DES_cblock des_in,des_out;
+	unsigned char des_in[8], des_out[8];
 	unsigned int i,j;
+	EVP_CIPHER_CTX *cctx = NULL;
+	int tmplen = 0;
+	unsigned char key1[8], key2[8]; 
 
 	if (keylen != 16) {
 		printf("key has wrong size, need 16 bytes, got %"SC_FORMAT_LEN_SIZE_T"d. aborting.\n",
@@ -427,27 +439,99 @@ static int cardos_sm4h(const unsigned char *in, size_t inlen, unsigned char
 		memcpy(&mac_input[4],&in[5],plain_lc);
 	/* calloc already did the ansi padding: rest is 00 */
 
-	/* prepare des key using first 8 bytes of key */
-	DES_set_key((const_DES_cblock*) &key[0], &ks_a);
-	/* prepare des key using second 8 bytes of key */
-	DES_set_key((const_DES_cblock*) &key[8], &ks_b);
+	/* prepare des ctx */
+	memcpy(key1, key, 8);
+	memcpy(key2, key + 8, 8);
+	
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	if (!legacy_provider) {
+		if (!(legacy_provider = OSSL_PROVIDER_try_load(NULL, "legacy", 1))) {
+			printf("Failed to load legacy provider, aborting\n");
+			free(mac_input);
+			return 0;
+		}
+	}
+#endif
 
+	cctx = EVP_CIPHER_CTX_new();
+	if (!cctx ||
+		!EVP_EncryptInit_ex(cctx, EVP_des_ecb(), NULL, key1, NULL) ||
+		!EVP_CIPHER_CTX_set_padding(cctx, 0)) {
+		printf("Can not setup context, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
+    
 	/* first block: XOR with IV and encrypt with key A IV is 8 bytes 00 */
 	for (i=0; i < 8; i++) des_in[i] = mac_input[i]^00;
-	DES_ecb_encrypt(&des_in, &des_out, &ks_a, 1);
+	if (!EVP_EncryptUpdate(cctx, des_out, &tmplen, des_in, 8)) {
+		printf("Can not setup context, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
 
 	/* all other blocks: XOR with prev. result and encrypt with key A */
 	for (j=1; j < (mac_input_len / 8); j++) {
 		for (i=0; i < 8; i++) des_in[i] = mac_input[i+j*8]^des_out[i];
-		DES_ecb_encrypt(&des_in, &des_out, &ks_a, 1);
+		if (!EVP_EncryptUpdate(cctx, des_out, &tmplen, des_in, 8)) {
+			printf("Can not encrypt, aborting\n");
+			free(mac_input);
+			EVP_CIPHER_CTX_free(cctx);
+			return 0;
+		}
+	}
+	if (!EVP_EncryptFinal_ex(cctx, des_out + tmplen, &tmplen)) {
+		printf("Can not encrypt, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
 	}
 
 	/* now decrypt with key B and encrypt with key A again */
 	/* (a noop if key A and B are the same, e.g. 8 bytes ff */
+	if (!EVP_DecryptInit_ex(cctx, EVP_des_ecb(), NULL, key2, NULL) ||
+		!EVP_CIPHER_CTX_set_padding(cctx, 0)) {
+		printf("Can not setup context, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
 	for (i=0; i < 8; i++) des_in[i] = des_out[i];
-	DES_ecb_encrypt(&des_in, &des_out, &ks_b, 0);
+	if (!EVP_DecryptUpdate(cctx, des_out, &tmplen, des_in, 8)) {
+		printf("Can not setup context, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
+	if (!EVP_EncryptFinal_ex(cctx, des_out + tmplen, &tmplen)) {
+		printf("Can not encrypt, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
+
+	if (!EVP_EncryptInit_ex(cctx, EVP_des_ecb(), NULL, key1, NULL) ||
+		!EVP_CIPHER_CTX_set_padding(cctx, 0)) {
+		printf("Can not setup context, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
 	for (i=0; i < 8; i++) des_in[i] = des_out[i];
-	DES_ecb_encrypt(&des_in, &des_out, &ks_a, 1);
+	if (!EVP_EncryptUpdate(cctx, des_out, &tmplen, des_in, 8)) {
+		printf("Can not encrypt, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
+	if (!EVP_EncryptFinal_ex(cctx, des_out + tmplen, &tmplen)) {
+		printf("Can not encrypt, aborting\n");
+		free(mac_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
 
 	/* now we want to enc:
  	 * orig APDU data plus mac (8 bytes) plus iso padding (1-8 bytes) */
@@ -480,12 +564,28 @@ static int cardos_sm4h(const unsigned char *in, size_t inlen, unsigned char
 	out[4] = enc_input_len;	/* lc */
 
 	/* encrypt first block */
+	cctx = EVP_CIPHER_CTX_new();
+	if (!cctx ||
+		!EVP_EncryptInit_ex(cctx, EVP_des_ede_ecb(), NULL, key, NULL) ||
+		!EVP_CIPHER_CTX_set_padding(cctx, 0)) {
+		printf("Can not setup context, aborting\n");
+		free(mac_input);
+		free(enc_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
 
 	/* xor data and IV (8 bytes 00) to get input data */
 	for (i=0; i < 8; i++) des_in[i] = enc_input[i] ^ 00;
 
 	/* encrypt with des2 (triple des, but using keys A-B-A) */
-	DES_ecb2_encrypt(&des_in, &des_out, &ks_a, &ks_b, 1);
+	if (!EVP_EncryptUpdate(cctx, des_out, &tmplen, des_in, 8)) {
+		printf("Can not encrypt, aborting\n");
+		free(mac_input);
+		free(enc_input);
+		EVP_CIPHER_CTX_free(cctx);
+		return 0;
+	}
 
 	/* copy encrypted bytes into output */
 	for (i=0; i < 8; i++) out[5+i] = des_out[i];
@@ -496,11 +596,19 @@ static int cardos_sm4h(const unsigned char *in, size_t inlen, unsigned char
 		for (i=0; i < 8; i++) des_in[i] = enc_input[i+j*8] ^ des_out[i];
 
 		/* encrypt with des2 (triple des, but using keys A-B-A) */
-		DES_ecb2_encrypt(&des_in, &des_out, &ks_a, &ks_b, 1);
+		if (!EVP_EncryptUpdate(cctx, des_out, &tmplen, des_in, 8)) {
+			printf("Can not encrypt, aborting\n");
+			free(mac_input);
+			free(enc_input);
+			EVP_CIPHER_CTX_free(cctx);
+			return 0;
+		}
 
 		/* copy encrypted bytes into output */
 		for (i=0; i < 8; i++) out[5+8*j+i] = des_out[i];
 	}
+	
+	EVP_CIPHER_CTX_free(cctx);
 	if (verbose)	{
 		printf ("Unencrypted APDU:\n");
 		util_hex_dump_asc(stdout, in, inlen, -1);
@@ -1076,11 +1184,18 @@ int main(int argc, char *argv[])
 			util_print_usage_and_die(app_name, options, option_help, NULL);
 		}
 	}
+	
+	if (action_count == 0)
+		util_print_usage_and_die(app_name, options, option_help, NULL);
 
 	/* create sc_context_t object */
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
+
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
 		fprintf(stderr, "Failed to establish context: %s\n",
@@ -1096,7 +1211,7 @@ int main(int argc, char *argv[])
 		goto end;
 	}
 
-	err = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);
+	err = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (err)
 		goto end;
 

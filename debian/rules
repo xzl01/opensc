@@ -1,13 +1,14 @@
 #!/usr/bin/make -f
 
 export DEB_CFLAGS_MAINT_APPEND = -Wno-error=deprecated-declarations \
-		-Wno-error=maybe-uninitialized
+		-Wno-error=stringop-overflow
 
 %:
 	dh $@
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
+		--enable-autostart-items \
 		--enable-pcsc \
 		--enable-doc \
 		--enable-dnie-ui \

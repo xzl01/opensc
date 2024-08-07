@@ -78,17 +78,17 @@
 					<listitem>
 						<para>
 							Specify hash algorithm used with RSA-PKCS-PSS signature or RSA-OAEP decryption.
-							Allowed values are "SHA-1", "SHA256", "SHA384", "SHA512", and some tokens may 
+							Allowed values are "SHA-1", "SHA256", "SHA384", "SHA512", and some tokens may
 							also allow "SHA224". Default is "SHA-1".
 						</para>
-						<para> 
+						<para>
 							Note that the input to RSA-PKCS-PSS has to be of the size equal to
 							the specified hash algorithm. E.g., for SHA256 the signature input must
 							be exactly 32 bytes long (for mechanisms SHA256-RSA-PKCS-PSS there is no
 							such restriction). For RSA-OAEP, the plaintext input size mLen must be
 							at most keyLen - 2 - 2*hashLen. For example, for RSA 3072-bit key and
 							SHA384, the longest plaintext to encrypt with RSA-OAEP is (with all
-							sizes in bytes): 384 - 2 - 2*48 = 286, aka 286 bytes. 
+							sizes in bytes): 384 - 2 - 2*48 = 286, aka 286 bytes.
 						</para>
 					</listitem>
 				</varlistentry>
@@ -148,7 +148,7 @@
 					</term>
 					<listitem><para>Specify the type and length (bytes if symmetric) of the key to create,
 					for example RSA:1024, EC:prime256v1, GOSTR3410-2012-256:B,
-					DES:8, DES3:24, AES:16 or GENERIC:64.</para></listitem>
+					DES:8, DES3:24, AES:16 or GENERIC:64. If the key type was incompletely specified, possible values are listed.</para></listitem>
 				</varlistentry>
 
 				<varlistentry>
@@ -162,7 +162,13 @@
 					<term>
 						<option>--usage-decrypt</option>
 					</term>
-					<listitem><para>Specify 'decrypt' key usage flag (RSA only, set DECRYPT privkey, ENCRYPT in pubkey).</para></listitem>
+					<listitem>
+						<para>Specify 'decrypt' key usage flag.</para>
+						<para>
+							For RSA keys, sets DECRYPT in privkey and ENCRYPT in pubkey. For secret
+							keys, sets both DECRYPT and ENCRYPT.
+						</para>
+					</listitem>
 				</varlistentry>
 
 				<varlistentry>
@@ -202,7 +208,12 @@
 						<option>--list-objects</option>,
 						<option>-O</option>
 					</term>
-					<listitem><para>Display a list of objects.</para></listitem>
+					<listitem>
+						<para>Display a list of objects.</para>
+						<para>The options <option>--keytype</option>, <option>--label</option>
+						, <option>--id</option> or <option>--application-id</option> can be
+						used to filter the listed objects.</para>
+					</listitem>
 				</varlistentry>
 
 				<varlistentry>
@@ -226,6 +237,13 @@
 						<option>--list-interfaces</option>
 					</term>
 					<listitem><para>List interfaces of PKCS #11 3.0 library.</para></listitem>
+				</varlistentry>
+
+				<varlistentry>
+					<term>
+						<option>--session-rw</option>,
+					</term>
+					<listitem><para>Forces to open the PKCS#11 session with CKF_RW_SESSION.</para></listitem>
 				</varlistentry>
 
 				<varlistentry>
@@ -344,6 +362,13 @@
 
 				<varlistentry>
 					<term>
+						<option>--undestroyable</option>
+					</term>
+					<listitem><para>Set the CKA_DESTROYABLE attribute to false (object cannot be destroyed)</para></listitem>
+				</varlistentry>
+
+				<varlistentry>
+					<term>
 						<option>--set-id</option> <replaceable>id</replaceable>,
 						<option>-e</option> <replaceable>id</replaceable>
 					</term>
@@ -375,6 +400,24 @@
 
 				<varlistentry>
 					<term>
+						<option>--encrypt</option>,
+					</term>
+					<listitem><para>Encrypt some data.</para></listitem>
+				</varlistentry>
+				<varlistentry>
+					<term>
+						<option>--unwrap</option>,
+					</term>
+					<listitem><para>Unwrap key.</para></listitem>
+				</varlistentry>
+				<varlistentry>
+					<term>
+						<option>--wrap</option>,
+					</term>
+					<listitem><para>Wrap key.</para></listitem>
+				</varlistentry>
+				<varlistentry>
+					<term>
 						<option>--derive</option>,
 					</term>
 					<listitem><para>Derive a secret key using another key and some data.</para></listitem>
@@ -394,7 +437,9 @@
 					<listitem><para>Specify how many bytes of salt should
 					be used in RSA-PSS signatures. Accepts two special values:
 					"-1" means salt length equals to digest length,
-					"-2" means use maximum permissible length.
+					"-2" or "-3" means use maximum permissible length.
+					For verify operation "-2" means that the salt length is automatically recovered from signature.
+					The value "-2" for the verify operation is supported for opensc pkcs#11 module only.
 					Default is digest length (-1).</para></listitem>
 				</varlistentry>
 
@@ -402,7 +447,7 @@
 					<term>
 						<option>--slot</option> <replaceable>id</replaceable>
 					</term>
-					<listitem><para>Specify the id of the slot to use.</para></listitem>
+					<listitem><para>Specify the id of the slot to use (accepts HEX format with 0x.. prefix or decimal number).</para></listitem>
 				</varlistentry>
 
 				<varlistentry>
@@ -533,7 +578,7 @@
 					</term>
 					<listitem><para>Specify the type of object to operate on.
 					Valid value are <literal>cert</literal>, <literal>privkey</literal>,
-					<literal>pubkey</literal>, <literal>secrkey</literal> 
+					<literal>pubkey</literal>, <literal>secrkey</literal>
 					and <literal>data</literal>.</para></listitem>
 				</varlistentry>
 
@@ -646,6 +691,15 @@
 					</para></listitem>
 				</varlistentry>
 
+				<varlistentry>
+					<term>
+						<option>--iv</option> <replaceable>data</replaceable>
+					</term>
+					<listitem><para>Initialization vector for symmetric ciphers.
+					The <replaceable>data</replaceable> is hexadecimal number, i.e. "000013aa7bffa0".
+					</para></listitem>
+				</varlistentry>
+
 			</variablelist>
 		</para>
 	</refsect1>
@@ -653,21 +707,100 @@
 	<refsect1>
 		<title>Examples</title>
 		<para>
-			To list all certificates on the smart card:
+			Perform a basic functionality test of the card:
+				<programlisting>pkcs11-tool --test --login</programlisting>
+
+			List all certificates on the smart card:
 				<programlisting>pkcs11-tool --list-objects --type cert</programlisting>
 
-			To read the certificate with ID <replaceable>KEY_ID</replaceable>
-			in DER format from smart card:
-				<programlisting>pkcs11-tool --read-object --id KEY_ID --type cert --output-file cert.der</programlisting>
+			Read the certificate with ID <varname>CERT_ID</varname>
+			in DER format from smart card and convert it to PEM via OpenSSL:
+			<programlisting>
+pkcs11-tool --read-object --id $CERT_ID --type cert \
+					--output-file cert.der
+openssl x509 -inform DER -in cert.der -outform PEM > cert.pem
+			</programlisting>
 
-			To convert the certificate in DER format to PEM format, use OpenSSL
-			tools:
-				<programlisting>openssl x509 -inform DER -in cert.der -outform PEM > cert.pem</programlisting>
+			Write a certificate to token:
+				<programlisting>pkcs11-tool --login --write-object certificate.der --type cert</programlisting>
 
-			To sign some data stored in file <replaceable>data</replaceable>
-			using the private key with ID <replaceable>ID</replaceable> and
+			Generate new RSA Key pair:
+				<programlisting>pkcs11-tool --login --keypairgen --key-type RSA:2048</programlisting>
+
+			Generate new extractable RSA Key pair:
+				<programlisting>pkcs11-tool --login --keypairgen --key-type RSA:2048 --extractable</programlisting>
+
+			Generate an elliptic curve key pair with OpenSSL and import it to the card as <varname>$ID</varname>:
+				<programlisting>openssl genpkey -out EC_private.der -outform DER \
+	-algorithm EC -pkeyopt ec_paramgen_curve:P-521
+pkcs11-tool --write-object EC_private.der --id "$ID" \
+	--type privkey --label "EC private key" -p "$PIN"
+openssl pkey -in EC_private.der -out EC_public.der \
+	-pubout -inform DER -outform DER
+pkcs11-tool --write-object EC_public.der --id "$ID" \
+	--type pubkey  --label "EC public key" -p $PIN</programlisting>
+
+			List private keys:
+				<programlisting>pkcs11-tool --login --list-objects --type privkey</programlisting>
+
+			Sign some data stored in file <filename>data</filename>
+			using the private key with ID <varname>ID</varname> and
 			using the RSA-PKCS mechanism:
-				<programlisting>pkcs11-tool --sign --id ID --mechanism RSA-PKCS --input-file data --output-file data.sig</programlisting>
+			<programlisting>
+pkcs11-tool --sign --id $ID --mechanism RSA-PKCS \
+	--input-file data --output-file data.sig
+			</programlisting>
+			The same is also possible by piping the data from stdin rather than specifying a input file:
+			<programlisting>
+dd if=data bs=128 count=1 \
+	| pkcs11-tool --sign --id $ID --mechanism RSA-PKCS \
+	> data.sig
+			</programlisting>
+
+			Verify the signed data:
+			<programlisting>
+pkcs11-tool --id ID --verify -m RSA-PKCS \
+	--input-file data --signature-file data.sig
+			</programlisting>
+
+			To encrypt file using the AES key with ID 85 and using mechanism AES-CBC with padding:
+				<programlisting>
+pkcs11-tool --login --encrypt --id 85 -m AES-CBC-PAD \
+	--iv "00000000000000000000000000000000" \
+	-i file.txt -o encrypted_file.data
+				</programlisting>
+			Decipher the encrypted file:
+				<programlisting>
+pkcs11-tool --login --decrypt --id 85 -m AES-CBC-PAD \
+	--iv "00000000000000000000000000000000" \
+	--i encrypted_file.data -o decrypted.txt
+				</programlisting>
+
+			Use the key with ID 75 using mechanism AES-CBC-PAD, with initialization vector
+			"00000000000000000000000000000000" to wrap the key with ID 76 into output file
+			<filename>exported_aes.key</filename>
+				<programlisting>
+pkcs11-tool --login --wrap --id 75 --mechanism AES-CBC-PAD \
+	--iv "00000000000000000000000000000000" \
+	--application-id 76 \
+	--output-file exported_aes.key
+				</programlisting>
+			Use the key with ID 22 and mechanism RSA-PKCS to unwrap key from file
+			<filename>aes_wrapped.key</filename>. After a successful unwrap operation,
+			a new AES key is created on token. ID of this key is set to 90 and label of this
+			key is set to <literal>unwrapped-key</literal>
+			Note: for the MyEID card, the AES key size must be present in key
+			specification i.e. AES:16
+				<programlisting>
+pkcs11-tool --login --unwrap --mechanism RSA-PKCS --id 22 \
+	-i aes_wrapped.key --key-type AES: \
+	--application-id 90 --applicatin-label unwrapped-key
+				</programlisting>
+
+			Use the SO-PIN to initialize or re-set the PIN:
+				<programlisting>
+pkcs11-tool --login --login-type so --init-pin
+				</programlisting>
 		</para>
 	</refsect1>
 

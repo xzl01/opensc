@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -28,9 +28,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef ENABLE_ZLIB
-#include "compression.h"
-#endif
 
 #include "cardctl.h"
 #include "pkcs15.h"
@@ -49,7 +46,39 @@ static struct sc_card_driver idprime_drv = {
  * are not useful here */
 static const struct sc_atr_table idprime_atrs[] = {
 	{ "3b:7f:96:00:00:80:31:80:65:b0:84:41:3d:f6:12:0f:fe:82:90:00",
-	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:00:00:00:00:ff:ff:ff:ff:ff:ff",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime 3810",
+	  SC_CARD_TYPE_IDPRIME_3810, 0, NULL },
+	{ "3b:7f:96:00:00:80:31:80:65:b0:84:56:51:10:12:0f:fe:82:90:00",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime 830",
+	  SC_CARD_TYPE_IDPRIME_830, 0, NULL },
+	{ "3b:7f:96:00:00:80:31:80:65:b0:84:61:60:fb:12:0f:fe:82:90:00",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime 930/3930",
+	  SC_CARD_TYPE_IDPRIME_930, 0, NULL },
+	{ "3b:ff:96:00:00:81:31:fe:43:80:31:80:65:b0:84:65:66:fb:12:01:78:82:90:00:85",
+	  "ff:ff:00:ff:ff:ff:ff:00:ff:ff:ff:ff:ff:ff:00:00:00:00:ff:ff:ff:ff:ff:ff:00",
+	  "based Gemalto IDPrime 930",
+	  SC_CARD_TYPE_IDPRIME_930, 0, NULL },
+	{ "3b:7f:96:00:00:80:31:80:65:b0:85:59:56:fb:12:0f:fe:82:90:00",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:ff:00:00:00:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime 940",
+	  SC_CARD_TYPE_IDPRIME_940, 0, NULL },
+	{ "3b:7f:96:00:00:80:31:80:65:b0:85:05:00:39:12:0f:fe:82:90:00",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime 940C",
+	  SC_CARD_TYPE_IDPRIME_940, 0, NULL },
+	{ "3b:7f:96:00:00:80:31:80:65:b0:85:03:00:ef:12:0f:fe:82:90:00",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime 840",
+	  SC_CARD_TYPE_IDPRIME_840, 0, NULL },
+	{ "3b:7f:96:00:00:80:31:80:65:b0:84:41:3d:f6:12:0f:fe:82:90:00",
+	  "ff:ff:00:ff:ff:ff:ff:ff:ff:ff:00:00:00:00:ff:00:00:ff:ff:ff",
+	  "Gemalto IDPrime MD 8840, 3840, 3810, 840, 830 and MD 940 Cards",
+	  SC_CARD_TYPE_IDPRIME_GENERIC, 0, NULL },
+	{ "3b:ff:96:00:00:81:31:fe:43:80:31:80:65:b0:85:59:56:fb:12:0f:fe:82:90:00:00",
+	  "ff:ff:00:ff:ff:ff:ff:00:ff:ff:ff:ff:ff:ff:00:00:00:00:ff:ff:ff:ff:ff:ff:00",
 	  "Gemalto IDPrime MD 8840, 3840, 3810, 840 and 830 Cards",
 	  SC_CARD_TYPE_IDPRIME_GENERIC, 0, NULL },
 	{ NULL, NULL, NULL, 0, 0, NULL }
@@ -64,23 +93,49 @@ static const sc_path_t idprime_path = {
 /* data structures to store meta data about IDPrime objects */
 typedef struct idprime_object {
 	int fd;
-	unsigned char key_reference;
+	int key_reference;
+	int valid_key_ref;
 	u8 df[2];
 	unsigned short length;
+	int pin_index;
 } idprime_object_t;
+
+/*
+ * IDPrime Container structure
+ * Simplification of auxiliary data from aux-data.c
+ */
+#define MAX_CONTAINER_NAME_LEN 39
+#define CONTAINER_OBJ_LEN 86
+typedef struct idprime_container {
+	uint8_t index;							/* Index of the container */
+	char guid[MAX_CONTAINER_NAME_LEN + 1];	/* Container name */
+} idprime_container_t;
+
+/*
+ * IDPrime key reference structure
+ */
+#define KEYREF_OBJ_LEN 8
+typedef struct idprime_keyref {
+	uint8_t index;					/* Index of the key reference */
+	uint8_t pin_index;				/* Index of the auth pin used for accessing key */
+	int key_reference;	/* Key reference used for accessing key */
+} idprime_keyref_t;
 
 /*
  * IDPrime private data per card state
  */
 typedef struct idprime_private_data {
-	u8 *cache_buf;			/* cached version of the currently selected file */
-	size_t cache_buf_len;		/* length of the cached selected file */
-	int cached;			/* is the cached selected file valid */
-	size_t file_size;		/* this is real file size since IDPrime is quite strict about lengths */
-	list_t pki_list;		/* list of pki containers */
-	idprime_object_t *pki_current;	/* current pki object _ctl function */
-	int tinfo_present;		/* Token Info Label object is present*/
-	u8 tinfo_df[2];			/* DF of object with Token Info Label */
+	u8 *cache_buf;				/* cached version of the currently selected file */
+	size_t cache_buf_len;			/* length of the cached selected file */
+	int cached;				/* is the cached selected file valid */
+	size_t file_size;			/* this is real file size since IDPrime is quite strict about lengths */
+	list_t pki_list;			/* list of pki containers */
+	idprime_object_t *pki_current;		/* current pki object _ctl function */
+	int tinfo_present;			/* Token Info Label object is present*/
+	u8 tinfo_df[2];				/* DF of object with Token Info Label */
+	unsigned long current_op;		/* current operation set by idprime_set_security_env */
+	list_t containers;			/* list of private key containers */
+	list_t keyrefmap;			/* list of key references for private keys */
 } idprime_private_data_t;
 
 /* For SimCList autocopy, we need to know the size of the data elements */
@@ -88,10 +143,56 @@ static size_t idprime_list_meter(const void *el) {
 	return sizeof(idprime_object_t);
 }
 
+static size_t idprime_container_list_meter(const void *el) {
+	return sizeof(idprime_container_t);
+}
+
+static size_t idprime_keyref_list_meter(const void *el) {
+	return sizeof(idprime_keyref_t);
+}
+
+static int idprime_add_container_to_list(list_t *list, const idprime_container_t *container)
+{
+	if (list_append(list, container) < 0)
+		return SC_ERROR_INTERNAL;
+	return SC_SUCCESS;
+}
+
+static int idprime_container_list_seeker(const void *el, const void *key)
+{
+	const idprime_container_t *container = (idprime_container_t *)el;
+
+	if ((el == NULL) || (key == NULL))
+		return 0;
+	if (container->index == *(uint8_t *)key)
+		return 1;
+	return 0;
+}
+
+static int idprime_add_keyref_to_list(list_t *list, const idprime_keyref_t *keyref)
+{
+	if (list_append(list, keyref) < 0)
+		return SC_ERROR_INTERNAL;
+	return SC_SUCCESS;
+}
+
+static int idprime_keyref_list_seeker(const void *el, const void *key)
+{
+	const idprime_keyref_t *keyref = (idprime_keyref_t *)el;
+
+	if ((el == NULL) || (key == NULL))
+		return 0;
+	if (keyref->index == *(uint8_t *)key)
+		return 1;
+	return 0;
+}
+
 void idprime_free_private_data(idprime_private_data_t *priv)
 {
 	free(priv->cache_buf);
 	list_destroy(&priv->pki_list);
+	list_destroy(&priv->containers);
+	list_destroy(&priv->keyrefmap);
 	free(priv);
 	return;
 }
@@ -111,6 +212,21 @@ idprime_private_data_t *idprime_new_private_data(void)
 		return NULL;
 	}
 
+	/* Initialize container list */
+	if (list_init(&priv->containers) != 0 ||
+	    list_attributes_copy(&priv->containers, idprime_container_list_meter, 1) != 0 ||
+	    list_attributes_seeker(&priv->containers, idprime_container_list_seeker) != 0) {
+		idprime_free_private_data(priv);
+		return NULL;
+	}
+
+	/* Initialize keyref list */
+	if (list_init(&priv->keyrefmap) != 0 ||
+	    list_attributes_copy(&priv->keyrefmap, idprime_keyref_list_meter, 1) != 0 ||
+	    list_attributes_seeker(&priv->keyrefmap, idprime_keyref_list_seeker) != 0) {
+		idprime_free_private_data(priv);
+		return NULL;
+	}
 	return priv;
 }
 
@@ -128,9 +244,8 @@ static int idprime_select_idprime(sc_card_t *card)
 	return iso_ops->select_file(card, &idprime_path, NULL);
 }
 
-/* This select some index file, which is useful for enumerating other files
- * on the card */
-static int idprime_select_index(sc_card_t *card)
+/* Select file by string path */
+static int idprime_select_file_by_path(sc_card_t *card, const char *str_path)
 {
 	int r;
 	sc_file_t *file = NULL;
@@ -143,17 +258,130 @@ static int idprime_select_index(sc_card_t *card)
 	}
 
 	/* Returns FCI with expected length of data */
-	sc_format_path("0101", &index_path);
+	sc_format_path(str_path, &index_path);
 	r = iso_ops->select_file(card, &index_path, &file);
-	if (r == SC_SUCCESS) {
-		r = file->size;
+
+	if (r != SC_SUCCESS) {
+		LOG_FUNC_RETURN(card->ctx, r);
+	}
+	/* Ignore too large files */
+	if (file->size > MAX_FILE_SIZE) {
+		r = SC_ERROR_INVALID_DATA;
+	} else {
+		r = (int)file->size;
 	}
 	sc_file_free(file);
-	/* Ignore too large files */
-	if (r <= 0 ||  r > MAX_FILE_SIZE) {
-		r = SC_ERROR_INVALID_DATA;
+	LOG_FUNC_RETURN(card->ctx, r);
+}
+
+static int idprime_process_containermap(sc_card_t *card, idprime_private_data_t *priv, int length)
+{
+	u8 *buf = NULL;
+	int r = SC_ERROR_OUT_OF_MEMORY;
+	int i;
+	uint8_t max_entries, container_index;
+
+	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
+
+	buf = malloc(length);
+	if (buf == NULL) {
+		goto done;
 	}
-	return r;
+
+	r = 0;
+	do {
+		/* Read at most CONTAINER_OBJ_LEN bytes */
+		int read_length = length - r > CONTAINER_OBJ_LEN ? CONTAINER_OBJ_LEN : length - r;
+		if (length == r) {
+			r = SC_ERROR_NOT_ENOUGH_MEMORY;
+			goto done;
+		}
+		const int got = iso_ops->read_binary(card, r, buf + r, read_length, 0);
+		if (got < 1) {
+			r = SC_ERROR_WRONG_LENGTH;
+			goto done;
+		}
+
+		r += got;
+		/* Try to read chunks of container size and stop when last container looks empty */
+		container_index = r > CONTAINER_OBJ_LEN ? (r / CONTAINER_OBJ_LEN - 1) * CONTAINER_OBJ_LEN : 0;
+	} while(length - r > 0 && buf[container_index] != 0);
+	max_entries = r / CONTAINER_OBJ_LEN;
+
+	for (i = 0; i < max_entries; i++) {
+		u8 *start = &buf[i * CONTAINER_OBJ_LEN];
+		idprime_container_t new_container = {0};
+		if (start[0] == 0) /* Empty record */
+			break;
+
+		new_container.index = i;
+		/* Reading UNICODE characters but skipping second byte */
+		int j = 0;
+		for (j = 0; j < MAX_CONTAINER_NAME_LEN; j++) {
+			if (start[2 * j] == 0)
+				break;
+			new_container.guid[j] = start[2 * j];
+		}
+
+		sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found container with index=%d, guid=%s", new_container.index, new_container.guid);
+
+		if ((r = idprime_add_container_to_list(&priv->containers, &new_container)) != SC_SUCCESS) {
+			goto done;
+		}
+	}
+
+	r = SC_SUCCESS;
+done:
+	free(buf);
+	LOG_FUNC_RETURN(card->ctx, r);
+}
+
+static int idprime_process_keyrefmap(sc_card_t *card, idprime_private_data_t *priv, int length)
+{
+	u8 *buf = NULL;
+	int r = SC_ERROR_OUT_OF_MEMORY;
+	int i, max_entries;
+
+	buf = malloc(length);
+	if (buf == NULL) {
+		goto done;
+	}
+
+	r = 0;
+	do {
+		if (length == r) {
+			r = SC_ERROR_NOT_ENOUGH_MEMORY;
+			goto done;
+		}
+		const int got = iso_ops->read_binary(card, r, buf + r, length - r, 0);
+		if (got < 1) {
+			r = SC_ERROR_WRONG_LENGTH;
+			goto done;
+		}
+
+		r += got;
+	} while(length - r > 0);
+	max_entries = r / KEYREF_OBJ_LEN;
+
+	for (i = 0; i < max_entries; i++) {
+		idprime_keyref_t new_keyref;
+		u8 *start = &buf[i * KEYREF_OBJ_LEN];
+		if (start[0] == 0) /* Empty key ref */
+			continue;
+
+		new_keyref.index = start[2];
+		new_keyref.key_reference = start[1];
+		new_keyref.pin_index = start[7];
+		sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found key reference with index=%d, pin=%d, keyref=%d", new_keyref.index, new_keyref.pin_index, new_keyref.key_reference);
+
+		if ((r = idprime_add_keyref_to_list(&priv->keyrefmap, &new_keyref)) != SC_SUCCESS) {
+			goto done;
+		}
+	}
+	r = SC_SUCCESS;
+done:
+	free(buf);
+	LOG_FUNC_RETURN(card->ctx, r);
 }
 
 static int idprime_process_index(sc_card_t *card, idprime_private_data_t *priv, int length)
@@ -163,23 +391,29 @@ static int idprime_process_index(sc_card_t *card, idprime_private_data_t *priv, 
 	int i, num_entries;
 	idprime_object_t new_object;
 
+	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
+
 	buf = malloc(length);
 	if (buf == NULL) {
 		goto done;
 	}
 
-	r = iso_ops->read_binary(card, 0, buf, length, 0);
-	if (r < 1) {
-		r = SC_ERROR_WRONG_LENGTH;
-		goto done;
-	}
+	r = 0;
+	do {
+		if (length == r) {
+			r = SC_ERROR_NOT_ENOUGH_MEMORY;
+			goto done;
+		}
+		const int got = iso_ops->read_binary(card, r, buf + r, length - r, 0);
+		if (got < 1) {
+			r = SC_ERROR_WRONG_LENGTH;
+			goto done;
+		}
+		/* First byte shows the number of entries, each of them 21 bytes long */
+		num_entries = buf[0];
+		r += got;
+	} while(r < num_entries * 21 + 1);
 
-	/* First byte shows the number of entries, each of them 21 bytes long */
-	num_entries = buf[0];
-	if (r < num_entries*21 + 1) {
-		r = SC_ERROR_INVALID_DATA;
-		goto done;
-	}
 	new_object.fd = 0;
 	for (i = 0; i < num_entries; i++) {
 		u8 *start = &buf[i*21+1];
@@ -194,29 +428,56 @@ static int idprime_process_index(sc_card_t *card, idprime_private_data_t *priv, 
 		/* in minidriver, mscp/kxcNN or kscNN lists certificates */
 		if (((memcmp(&start[4], "ksc", 3) == 0) || memcmp(&start[4], "kxc", 3) == 0)
 			&& (memcmp(&start[12], "mscp", 5) == 0)) {
-			new_object.fd++;
-			if (card->type == SC_CARD_TYPE_IDPRIME_V1) {
-				/* The key reference is one bigger than the value found here for some reason */
-				new_object.key_reference = start[8] + 1;
-			} else {
-				int key_id = 0;
-				if (start[8] >= '0' && start[8] <= '9') {
-					key_id = start[8] - '0';
-				}
-				switch (card->type) {
-				case SC_CARD_TYPE_IDPRIME_V2:
-					new_object.key_reference = 0x11 + key_id;
-					break;
-				case SC_CARD_TYPE_IDPRIME_V3:
-					new_object.key_reference = 0xF7 + key_id;
-					break;
-				case SC_CARD_TYPE_IDPRIME_V4:
-					new_object.key_reference = 0x56 + key_id;
-					break;
-				}
+			uint8_t cert_id = 0;
+			idprime_container_t *container = NULL;
+
+			if (start[7] >= '0' && start[7] <= '9' && start[8] >= '0' && start[8] <= '9') {
+				cert_id = (start[7] - '0') * 10 + start[8] - '0';
 			}
-			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found certificate with fd=%d, key_ref=%d",
-				new_object.fd, new_object.key_reference);
+			new_object.fd++;
+			new_object.key_reference = -1;
+			new_object.valid_key_ref = 0;
+			new_object.pin_index = 1;
+
+			container = (idprime_container_t *) list_seek(&priv->containers, &cert_id);
+			if (!container) {
+				/* Object is added, but missing private key */
+				sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "No corresponding container with private key found for certificate with id=%d", cert_id);
+				sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Adding certificate with fd=%d", new_object.fd);
+				idprime_add_object_to_list(&priv->pki_list, &new_object);
+				continue;
+			}
+
+			switch (card->type) {
+			case SC_CARD_TYPE_IDPRIME_3810:
+				new_object.key_reference = 0x31 + cert_id;
+				break;
+			case SC_CARD_TYPE_IDPRIME_830:
+				new_object.key_reference = 0x41 + cert_id;
+				break;
+			case SC_CARD_TYPE_IDPRIME_930:
+				new_object.key_reference = 0x11 + cert_id * 2;
+				break;
+			case SC_CARD_TYPE_IDPRIME_940: {
+					idprime_keyref_t *keyref = (idprime_keyref_t *) list_seek(&priv->keyrefmap, &cert_id);
+					if (!keyref) {
+						sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "No corresponding key reference found for certificate with id=%d, skipping", cert_id);
+						continue;
+					}
+					new_object.key_reference = keyref->key_reference;
+					new_object.pin_index = keyref->pin_index;
+					break;
+				}
+			case SC_CARD_TYPE_IDPRIME_840:
+				new_object.key_reference = 0xf7 + cert_id;
+				break;
+			default:
+				new_object.key_reference = 0x56 + cert_id;
+				break;
+			}
+			new_object.valid_key_ref = 1;
+			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found certificate with fd=%d, key_ref=%d corresponding to container \"%s\"",
+				new_object.fd, new_object.key_reference, container->guid);
 			idprime_add_object_to_list(&priv->pki_list, &new_object);
 
 		/* This looks like non-standard extension listing pkcs11 token info label in my card */
@@ -224,8 +485,18 @@ static int idprime_process_index(sc_card_t *card, idprime_private_data_t *priv, 
 			memcpy(priv->tinfo_df, new_object.df, sizeof(priv->tinfo_df));
 			priv->tinfo_present = 1;
 			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found p11/tinfo object");
+		} else if ((memcmp(&start[4], "cmapfile", 8) == 0) && (memcmp(&start[12], "mscp", 4) == 0)) {
+			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found mscp/cmapfile object %s",
+					(start[0] == 02 && start[1] == 04 ? "(already processed)" : "(in non-standard path!)"));
+		} else if (memcmp(&start[4], "cardapps", 8) == 0) {
+			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found cardapps object");
+		} else if (memcmp(&start[4], "cardid", 6) == 0) {
+			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found cardid object");
+		} else if (memcmp(&start[4], "cardcf", 6) == 0) {
+			sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Found cardcf object");
 		}
 	}
+
 	r = SC_SUCCESS;
 done:
 	free(buf);
@@ -237,11 +508,13 @@ done:
 static int idprime_init(sc_card_t *card)
 {
 	int r;
-	unsigned long flags;
+	unsigned long flags, ext_flags;
 	idprime_private_data_t *priv = NULL;
 	struct sc_apdu apdu;
 	u8 rbuf[CPLC_LENGTH];
 	size_t rbuflen = sizeof(rbuf);
+
+	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
 	/* We need to differentiate the OS version since they behave slightly differently */
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_2, 0xCA, 0x9F, 0x7F);
@@ -249,24 +522,19 @@ static int idprime_init(sc_card_t *card)
 	apdu.resplen = rbuflen;
 	apdu.le = rbuflen;
 	r = sc_transmit_apdu(card, &apdu);
-	card->type = SC_CARD_TYPE_IDPRIME_GENERIC;
 	if (r == SC_SUCCESS && apdu.resplen == CPLC_LENGTH) {
 		/* We are interested in the OS release level here */
 		switch (rbuf[11]) {
 		case 0x01:
-			card->type = SC_CARD_TYPE_IDPRIME_V1;
 			sc_log(card->ctx, "Detected IDPrime applet version 1");
 			break;
 		case 0x02:
-			card->type = SC_CARD_TYPE_IDPRIME_V2;
 			sc_log(card->ctx, "Detected IDPrime applet version 2");
 			break;
 		case 0x03:
-			card->type = SC_CARD_TYPE_IDPRIME_V3;
 			sc_log(card->ctx, "Detected IDPrime applet version 3");
 			break;
 		case 0x04:
-			card->type = SC_CARD_TYPE_IDPRIME_V4;
 			sc_log(card->ctx, "Detected IDPrime applet version 4");
 			break;
 		default:
@@ -279,18 +547,65 @@ static int idprime_init(sc_card_t *card)
 			r, apdu.resplen);
 	}
 
-	/* Now, select and process the index file */
-	r = idprime_select_index(card);
+	/* Proprietary data -- Applet version */
+	sc_format_apdu(card, &apdu, SC_APDU_CASE_2, 0xCA, 0xDF, 0x30);
+	apdu.resp = rbuf;
+	apdu.resplen = rbuflen;
+	apdu.le = rbuflen;
+	r = sc_transmit_apdu(card, &apdu);
+	if (r == SC_SUCCESS && apdu.resplen >= 10) {
+		/* Ber-TLV encoded */
+		if (rbuf[0] == 0xDF && rbuf[1] == 0x30 && rbuf[2] == apdu.resplen - 3) {
+			sc_log(card->ctx, "IDPrime Java Applet version %.*s", (int)apdu.resplen - 3, rbuf + 3);
+		}
+	}
+
+	priv = idprime_new_private_data();
+	if (!priv) {
+		LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
+	}
+
+	/* Select and process container file */
+	r = idprime_select_file_by_path(card, "0204");;
 	if (r <= 0) {
+		idprime_free_private_data(priv);
+		if (r == 0)
+			r = SC_ERROR_INVALID_DATA;
 		LOG_FUNC_RETURN(card->ctx, r);
 	}
 
 	sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Index file found");
 
-	priv = idprime_new_private_data();
-	if (!priv) {
-		return SC_ERROR_OUT_OF_MEMORY;
+	r = idprime_process_containermap(card, priv, r);
+	if (r != SC_SUCCESS) {
+		idprime_free_private_data(priv);
+		LOG_FUNC_RETURN(card->ctx, r);
 	}
+
+	if (card->type == SC_CARD_TYPE_IDPRIME_940) {
+		if ((r = idprime_select_file_by_path(card, "0005")) <= 0) {
+			idprime_free_private_data(priv);
+			if (r == 0)
+				r = SC_ERROR_INVALID_DATA;
+			LOG_FUNC_RETURN(card->ctx, r);
+		}
+
+		if ((r = idprime_process_keyrefmap(card, priv, r)) != SC_SUCCESS) {
+			idprime_free_private_data(priv);
+			LOG_FUNC_RETURN(card->ctx, r);
+		}
+	}
+
+	/* Select and process the index file */
+	r = idprime_select_file_by_path(card, "0101");
+	if (r <= 0) {
+		idprime_free_private_data(priv);
+		if (r == 0)
+			r = SC_ERROR_INVALID_DATA;
+		LOG_FUNC_RETURN(card->ctx, r);
+	}
+
+	sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Index file found");
 
 	r = idprime_process_index(card, priv, r);
 	if (r != SC_SUCCESS) {
@@ -301,17 +616,20 @@ static int idprime_init(sc_card_t *card)
 	card->drv_data = priv;
 
 	switch (card->type) {
-	case SC_CARD_TYPE_IDPRIME_V1:
-		card->name = "Gemalto IDPrime (OSv1)";
+	case SC_CARD_TYPE_IDPRIME_3810:
+		card->name = "Gemalto IDPrime 3810";
 		break;
-	case SC_CARD_TYPE_IDPRIME_V2:
-		card->name = "Gemalto IDPrime (OSv2)";
+	case SC_CARD_TYPE_IDPRIME_830:
+		card->name = "Gemalto IDPrime MD 830";
 		break;
-	case SC_CARD_TYPE_IDPRIME_V3:
-		card->name = "Gemalto IDPrime (OSv3)";
+	case SC_CARD_TYPE_IDPRIME_930:
+		card->name = "Gemalto IDPrime 930/3930";
 		break;
-	case SC_CARD_TYPE_IDPRIME_V4:
-		card->name = "Gemalto IDPrime (OSv4)";
+	case SC_CARD_TYPE_IDPRIME_940:
+		card->name = "Gemalto IDPrime 940";
+		break;
+	case SC_CARD_TYPE_IDPRIME_840:
+		card->name = "Gemalto IDPrime MD 840";
 		break;
 	case SC_CARD_TYPE_IDPRIME_GENERIC:
 	default:
@@ -320,7 +638,7 @@ static int idprime_init(sc_card_t *card)
 	}
 	card->cla = 0x00;
 
-	/* Set up algorithm info. */
+	/* Set up algorithm info for RSA. */
 	flags = SC_ALGORITHM_RSA_PAD_PKCS1
 		| SC_ALGORITHM_RSA_PAD_PSS
 		| SC_ALGORITHM_RSA_PAD_OAEP
@@ -331,8 +649,25 @@ static int idprime_init(sc_card_t *card)
 
 	_sc_card_add_rsa_alg(card, 1024, flags, 0);
 	_sc_card_add_rsa_alg(card, 2048, flags, 0);
+	if (card->type == SC_CARD_TYPE_IDPRIME_930
+	    || card->type == SC_CARD_TYPE_IDPRIME_940) {
+		_sc_card_add_rsa_alg(card, 4096, flags, 0);
+
+		/* Set up algorithm info for EC */
+		flags = SC_ALGORITHM_ECDSA_RAW | SC_ALGORITHM_ECDSA_HASH_NONE;
+		ext_flags = SC_ALGORITHM_EXT_EC_F_P
+			| SC_ALGORITHM_EXT_EC_ECPARAMETERS
+			| SC_ALGORITHM_EXT_EC_NAMEDCURVE
+			| SC_ALGORITHM_EXT_EC_UNCOMPRESES
+			;
+		_sc_card_add_ec_alg(card, 256, flags, ext_flags, NULL);
+		_sc_card_add_ec_alg(card, 384, flags, ext_flags, NULL);
+		_sc_card_add_ec_alg(card, 521, flags, ext_flags, NULL);
+	}
 
 	card->caps |= SC_CARD_CAP_ISO7816_PIN_INFO;
+
+	card->caps |= SC_CARD_CAP_RNG;
 
 	LOG_FUNC_RETURN(card->ctx, 0);
 }
@@ -357,8 +692,8 @@ static int idprime_match_card(sc_card_t *card)
 	if (i < 0)
 		return 0;
 
-	r = idprime_select_index(card);
-	return (r > 0);
+	r = idprime_select_file_by_path(card, "0101");
+	LOG_FUNC_RETURN(card->ctx, r > 0);
 }
 
 /* initialize getting a list and return the number of elements in the list */
@@ -398,8 +733,23 @@ static int idprime_fill_prkey_info(list_t *list, idprime_object_t **entry, sc_pk
 	prkey_info->id.value[0] = ((*entry)->fd >> 8) & 0xff;
 	prkey_info->id.value[1] = (*entry)->fd & 0xff;
 	prkey_info->id.len = 2;
-	prkey_info->key_reference = (*entry)->key_reference;
+	if ((*entry)->valid_key_ref)
+		prkey_info->key_reference = (*entry)->key_reference;
+	else
+		prkey_info->key_reference = -1;
 	*entry = list_iterator_next(list);
+	return SC_SUCCESS;
+}
+
+/* get PIN id of the current object on the list */
+static int idprime_get_pin_id(list_t *list, idprime_object_t **entry, const char **pin_id)
+{
+	if (pin_id == NULL || entry == NULL) {
+		return SC_ERROR_INVALID_ARGUMENTS;
+	}
+	*pin_id = "11"; // normal PIN id
+	if ((*entry)->pin_index != 1)
+		*pin_id = "83"; // signature PIN id
 	return SC_SUCCESS;
 }
 
@@ -511,6 +861,9 @@ static int idprime_card_ctl(sc_card_t *card, unsigned long cmd, void *ptr)
 				(sc_pkcs15_prkey_info_t *)ptr);
 		case SC_CARDCTL_IDPRIME_FINAL_GET_OBJECTS:
 			return idprime_final_iterator(&priv->pki_list);
+		case SC_CARDCTL_IDPRIME_GET_PIN_ID:
+			return idprime_get_pin_id(&priv->pki_list, &priv->pki_current,
+				(const char **)ptr);
 	}
 
 	LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
@@ -520,10 +873,8 @@ static int idprime_card_ctl(sc_card_t *card, unsigned long cmd, void *ptr)
 
 static int idprime_select_file(sc_card_t *card, const sc_path_t *in_path, sc_file_t **file_out)
 {
-	int r, len;
+	int r;
 	idprime_private_data_t * priv = card->drv_data;
-	u8 data[HEADER_LEN];
-	size_t data_len = HEADER_LEN;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
@@ -537,15 +888,8 @@ static int idprime_select_file(sc_card_t *card, const sc_path_t *in_path, sc_fil
 
 	r = iso_ops->select_file(card, in_path, file_out);
 	if (r == SC_SUCCESS && file_out != NULL) {
-		/* Try to read first bytes of the file to fix FCI in case of
-		 * compressed certififcate */
-		len = iso_ops->read_binary(card, 0, data, data_len, 0);
-		if (len == HEADER_LEN && data[0] == 0x01 && data[1] == 0x00) {
-			/* Cache the real file size for the caching read_binary() */
-			priv->file_size = (*file_out)->size;
-			/* Fix the information in the file structure to not confuse upper layers */
-			(*file_out)->size = (data[3]<<8) | data[2];
-		}
+ 	 	/* Cache the real file size for the caching read_binary() */
+ 	 	priv->file_size = (*file_out)->size;
 	}
 	/* Return the exit code of the select command */
 	return r;
@@ -553,22 +897,24 @@ static int idprime_select_file(sc_card_t *card, const sc_path_t *in_path, sc_fil
 
 // used to read existing certificates
 static int idprime_read_binary(sc_card_t *card, unsigned int offset,
-	unsigned char *buf, size_t count, unsigned long flags)
+	unsigned char *buf, size_t count, unsigned long *flags)
 {
 	struct idprime_private_data *priv = card->drv_data;
 	int r = 0;
 	int size;
+	size_t sz;
 
 	sc_log(card->ctx, "called; %"SC_FORMAT_LEN_SIZE_T"u bytes at offset %d",
 		count, offset);
 
 	if (!priv->cached && offset == 0) {
 		/* Read what was reported by FCI from select command */
-		int left = priv->file_size;
-		size_t read = 0;
+		size_t left = priv->file_size;
+		unsigned read = 0;
 
 		// this function is called to read and uncompress the certificate
 		u8 buffer[SC_MAX_EXT_APDU_BUFFER_SIZE];
+		u8 *data_buffer = buffer;
 		if (sizeof(buffer) < count || sizeof(buffer) < priv->file_size) {
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 		}
@@ -584,33 +930,20 @@ static int idprime_read_binary(sc_card_t *card, unsigned int offset,
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_DATA);
 		}
 		if (buffer[0] == 1 && buffer[1] == 0) {
-#ifdef ENABLE_ZLIB
-			size_t expectedsize = buffer[2] + buffer[3] * 0x100;
-			r = sc_decompress_alloc(&priv->cache_buf, &(priv->cache_buf_len),
-				buffer+4, priv->file_size-4, COMPRESSION_AUTO);
-			if (r != SC_SUCCESS) {
-				sc_log(card->ctx, "Zlib error: %d", r);
-				LOG_FUNC_RETURN(card->ctx, r);
-			}
-			if (priv->cache_buf_len != expectedsize) {
-				sc_log(card->ctx,
-					 "expected size: %"SC_FORMAT_LEN_SIZE_T"u real size: %"SC_FORMAT_LEN_SIZE_T"u",
-					 expectedsize, priv->cache_buf_len);
-				LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_DATA);
-			}
-#else
-			sc_log(card->ctx, "compression not supported, no zlib");
-			return SC_ERROR_NOT_SUPPORTED;
-#endif /* ENABLE_ZLIB */
+			/* Data will be decompressed later */
+			data_buffer += 4;
+			sz = priv->file_size - 4;
+			if (flags)
+				*flags |= SC_FILE_FLAG_COMPRESSED_AUTO;
 		} else {
-			/* assuming uncompressed certificate */
-			priv->cache_buf = malloc(r);
-			if (priv->cache_buf == NULL) {
-				return SC_ERROR_OUT_OF_MEMORY;
-			}
-			memcpy(priv->cache_buf, buffer, r);
-			priv->cache_buf_len = r;
+			sz = priv->file_size;
 		}
+		priv->cache_buf = malloc(sz);
+		if (priv->cache_buf == NULL) {
+			return SC_ERROR_OUT_OF_MEMORY;
+		}
+		memcpy(priv->cache_buf, data_buffer, sz);
+		priv->cache_buf_len = sz;
 		priv->cached = 1;
 	}
 	if (offset >= priv->cache_buf_len) {
@@ -627,12 +960,15 @@ idprime_set_security_env(struct sc_card *card,
 {
 	int r;
 	struct sc_security_env new_env;
+	idprime_private_data_t *priv = NULL;
 
 	if (card == NULL || env == NULL) {
 		return SC_ERROR_INVALID_ARGUMENTS;
 	}
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
+
+	priv = card->drv_data;
 
 	/* The card requires algorithm reference here */
 	new_env = *env;
@@ -663,7 +999,8 @@ idprime_set_security_env(struct sc_card *card,
 			} else if (env->algorithm_flags & SC_ALGORITHM_MGF1_SHA512) {
 				new_env.algorithm_ref = 0x65;
 			}
-		} else { /* RSA-PKCS */
+			priv->current_op = SC_ALGORITHM_RSA;
+		} else if (env->algorithm_flags & (SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01 | SC_ALGORITHM_RSA_PAD_OAEP)) {
 			if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA256) {
 				new_env.algorithm_ref = 0x42;
 			} else if (env->algorithm_flags & SC_ALGORITHM_RSA_HASH_SHA384) {
@@ -673,6 +1010,10 @@ idprime_set_security_env(struct sc_card *card,
 			} else { /* RSA-PKCS without hashing */
 				new_env.algorithm_ref = 0x02;
 			}
+			priv->current_op = SC_ALGORITHM_RSA;
+		} else if (env->algorithm == SC_ALGORITHM_EC) {
+			new_env.algorithm_ref = 0x44;
+			priv->current_op = SC_ALGORITHM_EC;
 		}
 		break;
 	default:
@@ -692,9 +1033,10 @@ idprime_compute_signature(struct sc_card *card,
 	int r;
 	struct sc_apdu apdu;
 	u8 *p;
-	u8 sbuf[128]; /* For SHA-512 we need 64 + 2 bytes */
+	u8 sbuf[128] = {0}; /* For SHA-512 we need 64 + 2 bytes */
 	u8 rbuf[4096]; /* needs work. for 3072 keys, needs 384+2 or so */
 	size_t rbuflen = sizeof(rbuf);
+	idprime_private_data_t *priv = card->drv_data;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
@@ -703,10 +1045,17 @@ idprime_compute_signature(struct sc_card *card,
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
 
+	/* The data for ECDSA should be padded to the length of a multiple of 8 */
+	size_t pad = 0;
+	if (priv->current_op == SC_ALGORITHM_EC && datalen % 8 != 0) {
+		pad = 8 - (datalen % 8);
+		datalen += pad;
+	}
+
 	p = sbuf;
 	*(p++) = 0x90;
 	*(p++) = datalen;
-	memcpy(p, data, datalen);
+	memcpy(p + pad, data, datalen - pad);
 	p += datalen;
 
 	/* INS: 0x2A  PERFORM SECURITY OPERATION
@@ -725,7 +1074,7 @@ idprime_compute_signature(struct sc_card *card,
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 
 	/* This just returns the passed data (hash code) (for verification?) */
-	if (apdu.resplen != datalen || memcmp(rbuf, data, datalen) != 0) {
+	if (apdu.resplen != datalen || memcmp(rbuf + pad, data, datalen - pad) != 0) {
 		sc_log(card->ctx, "The initial APDU did not return the same data");
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
@@ -749,7 +1098,7 @@ idprime_compute_signature(struct sc_card *card,
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 
 	if (apdu.sw1 == 0x90 && apdu.sw2 == 0x00)
-		LOG_FUNC_RETURN(card->ctx, apdu.resplen);
+		LOG_FUNC_RETURN(card->ctx, (int)apdu.resplen);
 
 	r = sc_check_sw(card, apdu.sw1, apdu.sw2);
 	LOG_TEST_RET(card->ctx, r, "Card returned error");
@@ -808,11 +1157,43 @@ idprime_decipher(struct sc_card *card,
 	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
 
 	if (apdu.sw1 == 0x90 && apdu.sw2 == 0x00)
-		LOG_FUNC_RETURN(card->ctx, apdu.resplen);
+		LOG_FUNC_RETURN(card->ctx, (int)apdu.resplen);
 	else
 		LOG_FUNC_RETURN(card->ctx, sc_check_sw(card, apdu.sw1, apdu.sw2));
 }
 
+static int
+idprime_get_challenge(struct sc_card *card, u8 *rnd, size_t len)
+{
+	u8 rbuf[16];
+	size_t out_len;
+	struct sc_apdu apdu;
+	int r;
+
+	LOG_FUNC_CALLED(card->ctx);
+
+	if (len <= 8) {
+		/* official closed driver always calls this regardless the length */
+		sc_format_apdu(card, &apdu, SC_APDU_CASE_2, 0x84, 0x00, 0x01);
+		apdu.le = apdu.resplen = 8;
+	} else {
+		/* this was discovered accidentally - all 16 bytes seem random */
+		sc_format_apdu(card, &apdu, SC_APDU_CASE_2, 0x84, 0x00, 0x00);
+		apdu.le = apdu.resplen = 16;
+	}
+	apdu.resp = rbuf;
+
+	r = sc_transmit_apdu(card, &apdu);
+	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
+
+	r = sc_check_sw(card, apdu.sw1, apdu.sw2);
+	LOG_TEST_RET(card->ctx, r, "GET CHALLENGE failed");
+
+	out_len = len < apdu.resplen ? len : apdu.resplen;
+	memcpy(rnd, rbuf, out_len);
+
+	LOG_FUNC_RETURN(card->ctx, (int) out_len);
+}
 
 static struct sc_card_driver * sc_get_driver(void)
 {
@@ -831,6 +1212,8 @@ static struct sc_card_driver * sc_get_driver(void)
 	idprime_ops.set_security_env = idprime_set_security_env;
 	idprime_ops.compute_signature = idprime_compute_signature;
 	idprime_ops.decipher = idprime_decipher;
+
+	idprime_ops.get_challenge = idprime_get_challenge;
 
 	return &idprime_drv;
 }

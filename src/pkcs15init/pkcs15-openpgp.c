@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -235,13 +235,13 @@ static int openpgp_generate_key_rsa(sc_card_t *card, sc_pkcs15_object_t *obj,
 
 	/* Prepare buffer */
 	key_info.u.rsa.modulus_len = required->modulus_length;
-	key_info.u.rsa.modulus = calloc(required->modulus_length >> 3, 1);
+	key_info.u.rsa.modulus = calloc(1, BYTES4BITS(required->modulus_length));
 	if (key_info.u.rsa.modulus == NULL)
 		LOG_FUNC_RETURN(ctx, SC_ERROR_NOT_ENOUGH_MEMORY);
 
 	/* The OpenPGP supports only 32-bit exponent. */
 	key_info.u.rsa.exponent_len = 32;
-	key_info.u.rsa.exponent = calloc(BYTES4BITS(key_info.u.rsa.exponent_len), 1);
+	key_info.u.rsa.exponent = calloc(1, BYTES4BITS(key_info.u.rsa.exponent_len));
 	if (key_info.u.rsa.exponent == NULL) {
 		free(key_info.u.rsa.modulus);
 		LOG_FUNC_RETURN(ctx, SC_ERROR_NOT_ENOUGH_MEMORY);
@@ -252,18 +252,18 @@ static int openpgp_generate_key_rsa(sc_card_t *card, sc_pkcs15_object_t *obj,
 
 	pubkey->algorithm = SC_ALGORITHM_RSA;
 	sc_log(ctx, "Set output modulus info");
-	pubkey->u.rsa.modulus.len = key_info.u.rsa.modulus_len;
-	pubkey->u.rsa.modulus.data = calloc(key_info.u.rsa.modulus_len, 1);
+	pubkey->u.rsa.modulus.len = BYTES4BITS(key_info.u.rsa.modulus_len);
+	pubkey->u.rsa.modulus.data = calloc(1, pubkey->u.rsa.modulus.len);
 	if (pubkey->u.rsa.modulus.data == NULL)
 		goto err;
-	memcpy(pubkey->u.rsa.modulus.data, key_info.u.rsa.modulus, key_info.u.rsa.modulus_len);
+	memcpy(pubkey->u.rsa.modulus.data, key_info.u.rsa.modulus, BYTES4BITS(key_info.u.rsa.modulus_len));
 
 	sc_log(ctx, "Set output exponent info");
-	pubkey->u.rsa.exponent.len = key_info.u.rsa.exponent_len;
-	pubkey->u.rsa.exponent.data = calloc(BYTES4BITS(key_info.u.rsa.exponent_len), 1);
+	pubkey->u.rsa.exponent.len = BYTES4BITS(key_info.u.rsa.exponent_len);
+	pubkey->u.rsa.exponent.data = calloc(1, pubkey->u.rsa.exponent.len);
 	if (pubkey->u.rsa.exponent.data == NULL)
 		goto err;
-	memcpy(pubkey->u.rsa.exponent.data, key_info.u.rsa.exponent, BYTES4BITS(key_info.u.rsa.exponent_len));
+	memcpy(pubkey->u.rsa.exponent.data, key_info.u.rsa.exponent, pubkey->u.rsa.exponent.len);
 
 err:
 	free(key_info.u.rsa.modulus);
@@ -423,7 +423,7 @@ static int openpgp_store_data(struct sc_pkcs15_card *p15card, struct sc_profile 
 {
 	sc_card_t *card = p15card->card;
 	sc_context_t *ctx = card->ctx;
-	sc_file_t *file;
+	sc_file_t *file = NULL;
 	sc_pkcs15_cert_info_t *cinfo;
 	sc_pkcs15_id_t *cid;
 	sc_pkcs15_data_info_t *dinfo;
@@ -443,6 +443,7 @@ static int openpgp_store_data(struct sc_pkcs15_card *p15card, struct sc_profile 
 	case SC_PKCS15_TYPE_CERT:
 		cinfo = (sc_pkcs15_cert_info_t *) obj->data;
 		cid = &(cinfo->id);
+		unsigned int tag = 0x7F21;
 
 		if (cid->len != 1) {
 			sc_log(card->ctx, "ID=%s is not valid.", sc_dump_hex(cid->value, cid->len));
@@ -450,22 +451,37 @@ static int openpgp_store_data(struct sc_pkcs15_card *p15card, struct sc_profile 
 		}
 
 		/* OpenPGP card v.2 contains only 1 certificate */
-		if (cid->value[0] != 3) {
+		if (cid->value[0] != 3 && p15card->card->type < SC_CARD_TYPE_OPENPGP_V3) {
 			sc_log(card->ctx,
 			       "This version does not support certificate ID = %d (only ID=3 is supported).",
 			       cid->value[0]);
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
 		}
-		/* Just update the certificate DO */
+
+		/* OpenPGP card < v.3 does not support SELECT DATA calls */
+		if (p15card->card->type >= SC_CARD_TYPE_OPENPGP_V3) {
+			/* Mapping [3..1] passed --id to [0..2] for param */
+			u8 param = (u8) (2 - (cid->value[0] - 1));
+			/* check for unsigned underflow */
+			if (param > 2) {
+				LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
+			}
+
+			/* Just update the certificate DO */
+			r = sc_card_ctl(card, SC_CARDCTL_OPENPGP_SELECT_DATA, &param);
+			LOG_TEST_RET(card->ctx, r, "Failed OpenPGP - select data");
+		}
+
 		sc_format_path("7F21", path);
 		r = sc_select_file(card, path, &file);
+
 		LOG_TEST_RET(card->ctx, r, "Cannot select cert file");
 		r = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_UPDATE);
 		sc_log(card->ctx,
 		       "Data to write is %"SC_FORMAT_LEN_SIZE_T"u long",
 		       content->len);
 		if (r >= 0 && content->len)
-			r = sc_put_data(p15card->card, 0x7F21, (const unsigned char *) content->value, content->len);
+			r = sc_put_data(p15card->card, tag, (const unsigned char *) content->value, content->len);
 		break;
 
 	case SC_PKCS15_TYPE_DATA_OBJECT:
@@ -504,7 +520,7 @@ static int openpgp_store_data(struct sc_pkcs15_card *p15card, struct sc_profile 
 	default:
 		r = SC_ERROR_NOT_IMPLEMENTED;
 	}
-
+	sc_file_free(file);
 	LOG_FUNC_RETURN(card->ctx, r);
 }
 

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -242,6 +242,9 @@ jpki_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data, int *tries_left)
 
 	switch (data->cmd) {
 	case SC_PIN_CMD_VERIFY:
+		/* detect overloaded APDU with SC_PIN_CMD_GET_INFO */
+		if (data->pin1.len == 0 && !(data->flags & SC_PIN_CMD_USE_PINPAD))
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_PIN_LENGTH);
 		sc_format_apdu(card, &apdu, SC_APDU_CASE_3, 0x20, 0x00, 0x80);
 		apdu.data = data->pin1.data;
 		apdu.datalen = data->pin1.len;
@@ -290,7 +293,7 @@ jpki_set_security_env(sc_card_t * card,
 
 	LOG_FUNC_CALLED(card->ctx);
 	sc_log(card->ctx,
-	       "flags=%08lx op=%d alg=%d algf=%08x algr=%08x kr0=%02x, krfl=%"SC_FORMAT_LEN_SIZE_T"u",
+	       "flags=%08lx op=%d alg=%lu algf=%08lx algr=%08lx kr0=%02x, krfl=%"SC_FORMAT_LEN_SIZE_T"u",
 	       env->flags, env->operation, env->algorithm,
 	       env->algorithm_flags, env->algorithm_ref, env->key_ref[0],
 	       env->key_ref_len);
@@ -345,7 +348,7 @@ jpki_compute_signature(sc_card_t * card,
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
 	}
 	memcpy(out, resp, apdu.resplen);
-	LOG_FUNC_RETURN(card->ctx, apdu.resplen);
+	LOG_FUNC_RETURN(card->ctx, (int)apdu.resplen);
 }
 
 static int jpki_card_reader_lock_obtained(sc_card_t *card, int was_reset)
@@ -359,6 +362,11 @@ static int jpki_card_reader_lock_obtained(sc_card_t *card, int was_reset)
 	}
 
 	LOG_FUNC_RETURN(card->ctx, r);
+}
+
+static int jpki_logout(sc_card_t *card)
+{
+	return jpki_select_ap(card);
 }
 
 static struct sc_card_driver *
@@ -375,6 +383,7 @@ sc_get_driver(void)
 	jpki_ops.set_security_env = jpki_set_security_env;
 	jpki_ops.compute_signature = jpki_compute_signature;
 	jpki_ops.card_reader_lock_obtained = jpki_card_reader_lock_obtained;
+	jpki_ops.logout = jpki_logout;
 
 	return &jpki_drv;
 }

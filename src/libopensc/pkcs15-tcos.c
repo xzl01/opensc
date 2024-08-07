@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -137,7 +137,7 @@ static int insert_key(
 		}
 		sc_log(ctx, 
 			"Searching for Key-Ref %02X\n", key_reference);
-		while ((r = sc_read_record(card, ++rec_no, buf, sizeof(buf), SC_RECORD_BY_REC_NR)) > 0) {
+		while ((r = sc_read_record(card, ++rec_no, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR)) > 0) {
 			int found = 0;
 			if (buf[0] != 0xA0 || r < 2)
 				continue;
@@ -240,7 +240,7 @@ static int insert_pin(
 		}
 		sc_log(ctx, 
 			"Searching for PIN-Ref %02X\n", pin_reference);
-		while ((r = sc_read_record(card, ++rec_no, buf, sizeof(buf), SC_RECORD_BY_REC_NR)) > 0) {
+		while ((r = sc_read_record(card, ++rec_no, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR)) > 0) {
 			int found = 0, fbz = -1;
 			if (r < 2 || buf[0] != 0xA0)
 				continue;
@@ -543,5 +543,6 @@ int sc_pkcs15emu_tcos_init_ex(
 	if(!detect_signtrust(p15card)) return SC_SUCCESS;
 	if(!detect_datev(p15card)) return SC_SUCCESS;
 
+	sc_pkcs15_card_clear(p15card);
 	return SC_ERROR_INTERNAL;
 }

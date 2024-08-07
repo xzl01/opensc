@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifndef _SC_SSLUTIL_H
 #define _SC_SSLUTIL_H
@@ -28,11 +28,9 @@
 
 #define ssl_error(ctx) { \
 	unsigned long _r; \
-	ERR_load_crypto_strings(); \
 	for (_r = ERR_get_error(); _r; _r = ERR_get_error()) { \
 		sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "%s", ERR_error_string(_r, NULL)); \
 	} \
-	ERR_free_strings(); \
 }
 #endif
 

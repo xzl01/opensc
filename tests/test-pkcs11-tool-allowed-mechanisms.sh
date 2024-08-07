@@ -1,5 +1,5 @@
 #!/bin/bash
-SOURCE_PATH=${SOURCE_PATH:-../}
+SOURCE_PATH=${SOURCE_PATH:-..}
 
 source $SOURCE_PATH/tests/common.sh
 
@@ -7,7 +7,7 @@ echo "======================================================="
 echo "Setup SoftHSM"
 echo "======================================================="
 if [[ ! -f $P11LIB ]]; then
-    echo "WARNINIG: The SoftHSM is not installed. Can not run this test"
+    echo "WARNING: The SoftHSM is not installed. Can not run this test"
     exit 77;
 fi
 # The Ubuntu has old softhsm version not supporting this feature
@@ -21,7 +21,7 @@ echo "======================================================="
 ID="05"
 MECHANISMS="RSA-PKCS,SHA1-RSA-PKCS,RSA-PKCS-PSS"
 # Generate key pair
-$PKCS11_TOOL --keypairgen --key-type="RSA:" --login --pin=$PIN \
+$PKCS11_TOOL --keypairgen --key-type="RSA:1024" --login --pin=$PIN \
 	--module="$P11LIB" --label="test" --id="$ID" \
 	--allowed-mechanisms="$MECHANISMS,SHA384-RSA-PKCS"
 assert $? "Failed to Generate RSA key pair"

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "internal.h"
 #include "common/compat_strlcpy.h"
 #include "libopensc/pkcs15.h"
 #include "libopensc/cardctl.h"
@@ -51,11 +52,11 @@ typedef struct pdata_st {
 	unsigned int maxlen;
 	unsigned int minlen;
 	unsigned int storedlen;
-	int         flags;	
+	int         flags;
 	int         tries_left;
 	const char  pad_char;
 	int         obj_flags;
-} pindata; 
+} pindata;
 
 typedef struct prdata_st {
 	const char *id;
@@ -77,14 +78,14 @@ static int get_cert_len(sc_card_t *card, sc_path_t *path)
 	if (r < 0)
 		return 0;
 	r = sc_read_binary(card, 0, buf, sizeof(buf), 0);
-	if (r < 0)	
+	if (r < 0)
 		return 0;
 	if (buf[0] != 0x30 || buf[1] != 0x82)
 		return 0;
 	path->index = 0;
-	path->count = ((((size_t) buf[2]) << 8) | buf[3]) + 4;
+	path->count = ((((int) buf[2]) << 8) | buf[3]) + 4;
 	return 1;
-} 
+}
 
 static int acos_detect_card(sc_pkcs15_card_t *p15card)
 {
@@ -121,7 +122,7 @@ static int sc_pkcs15emu_atrust_acos_init(sc_pkcs15_card_t *p15card)
 		  4, 4, 8, SC_PKCS15_PIN_FLAG_NEEDS_PADDING |
 		  SC_PKCS15_PIN_FLAG_LOCAL, -1, 0x00,
 		  SC_PKCS15_CO_FLAG_MODIFIABLE | SC_PKCS15_CO_FLAG_PRIVATE },
-		{ NULL, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0} 
+		{ NULL, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	};
 
 	const prdata prkeys[] = {
@@ -152,22 +153,20 @@ static int sc_pkcs15emu_atrust_acos_init(sc_pkcs15_card_t *p15card)
 	r = sc_bin_to_hex(buf, 8, buf2, sizeof(buf2), 0);
 	if (r != SC_SUCCESS)
 		return SC_ERROR_INTERNAL;
-	free(p15card->tokeninfo->serial_number);
-	p15card->tokeninfo->serial_number = strdup(buf2);
+
+	set_string(&p15card->tokeninfo->serial_number, buf2);
 	if (!p15card->tokeninfo->serial_number)
 		return SC_ERROR_INTERNAL;
 
 	/* manufacturer ID */
-	free(p15card->tokeninfo->manufacturer_id);
-	p15card->tokeninfo->manufacturer_id = strdup(MANU_ID);
+	set_string(&p15card->tokeninfo->manufacturer_id, MANU_ID);
 	if (!p15card->tokeninfo->manufacturer_id)
-		return SC_ERROR_INTERNAL;
+		goto err;
 
 	/* card label */
-	free(p15card->tokeninfo->label);
-	p15card->tokeninfo->label = strdup(CARD_LABEL);
+	set_string(&p15card->tokeninfo->label, CARD_LABEL);
 	if (!p15card->tokeninfo->label)
-		return SC_ERROR_INTERNAL;
+		goto err;
 
 	/* set certs */
 	for (i = 0; certs[i].label; i++) {
@@ -189,7 +188,7 @@ static int sc_pkcs15emu_atrust_acos_init(sc_pkcs15_card_t *p15card)
 
 		r = sc_pkcs15emu_add_x509_cert(p15card, &cert_obj, &cert_info);
 		if (r < 0)
-			return SC_ERROR_INTERNAL;
+			goto err;
 	}
 	/* set pins */
 	for (i = 0; pins[i].label; i++) {
@@ -217,7 +216,7 @@ static int sc_pkcs15emu_atrust_acos_init(sc_pkcs15_card_t *p15card)
 
 		r = sc_pkcs15emu_add_pin_obj(p15card, &pin_obj, &pin_info);
 		if (r < 0)
-			return SC_ERROR_INTERNAL;
+			goto err;
 	}
 	/* set private keys */
 	for (i = 0; prkeys[i].label; i++) {
@@ -241,19 +240,23 @@ static int sc_pkcs15emu_atrust_acos_init(sc_pkcs15_card_t *p15card)
 
 		r = sc_pkcs15emu_add_rsa_prkey(p15card, &prkey_obj, &prkey_info);
 		if (r < 0)
-			return SC_ERROR_INTERNAL;
+			goto err;
 	}
-		
+
 	/* select the application DF */
 	sc_format_path("DF71", &path);
 	r = sc_select_file(card, &path, &file);
 	if (r != SC_SUCCESS || !file)
-		return SC_ERROR_INTERNAL;
+		goto err;
 	/* set the application DF */
 	sc_file_free(p15card->file_app);
 	p15card->file_app = file;
 
 	return SC_SUCCESS;
+
+err:
+	sc_pkcs15_card_clear(p15card);
+	return SC_ERROR_INTERNAL;
 }
 
 int sc_pkcs15emu_atrust_acos_init_ex(sc_pkcs15_card_t *p15card,

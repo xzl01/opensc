@@ -31,21 +31,27 @@ pkcs11_derive(test_cert_t *o, token_info_t * info,
 	CK_OBJECT_HANDLE newkey;
 	CK_OBJECT_CLASS newkey_class = CKO_SECRET_KEY;
 	CK_KEY_TYPE newkey_type = CKK_GENERIC_SECRET;
-	CK_BBOOL true = TRUE;
-	CK_BBOOL false = FALSE;
+	CK_ULONG newkey_len = (o->bits + 7) / 8;
+	CK_BYTE newkey_id[] = {0x00, 0xff, 0x31};
+	CK_BYTE newkey_label[] = {"Derived key"};
+	CK_BBOOL _true = TRUE;
+	CK_BBOOL _false = FALSE;
 	CK_ATTRIBUTE template[] = {
-		{CKA_TOKEN, &false, sizeof(false)}, /* session only object */
-		{CKA_CLASS, &newkey_class, sizeof(newkey_class)},
-		{CKA_KEY_TYPE, &newkey_type, sizeof(newkey_type)},
-		{CKA_SENSITIVE, &false, sizeof(false)},
-		{CKA_EXTRACTABLE, &true, sizeof(true)},
-		{CKA_ENCRYPT, &true, sizeof(true)},
-		{CKA_DECRYPT, &true, sizeof(true)},
-		{CKA_WRAP, &true, sizeof(true)},
-		{CKA_UNWRAP, &true, sizeof(true)}
+			{CKA_TOKEN, &_false, sizeof(_false)}, /* session only object */
+			{CKA_CLASS, &newkey_class, sizeof(newkey_class)},
+			{CKA_ID, &newkey_id, sizeof(newkey_id)},
+			{CKA_LABEL, &newkey_label, sizeof(newkey_label)},
+			{CKA_KEY_TYPE, &newkey_type, sizeof(newkey_type)},
+			{CKA_VALUE_LEN, &newkey_len, sizeof(newkey_len)},
+			{CKA_SENSITIVE, &_false, sizeof(_false)},
+			{CKA_EXTRACTABLE, &_true, sizeof(_true)},
+			{CKA_ENCRYPT, &_true, sizeof(_true)},
+			{CKA_DECRYPT, &_true, sizeof(_true)},
+			{CKA_WRAP, &_true, sizeof(_true)},
+			{CKA_UNWRAP, &_true, sizeof(_true)},
 	};
 	CK_ATTRIBUTE get_value = {CKA_VALUE, NULL_PTR, 0};
-	CK_ULONG template_len = 9;
+	CK_ULONG template_len = 10;
 
 	params.pSharedData = NULL;
 	params.ulSharedDataLen = 0;
@@ -67,17 +73,20 @@ pkcs11_derive(test_cert_t *o, token_info_t * info,
 		&get_value, 1);
 	if (rv != CKR_OK) {
 		fail_msg("C_GetAttributeValue: rv = 0x%.8lX\n", rv);
+		destroy_tmp_object(info, newkey);
 		return 0;
 	}
 
 	get_value.pValue = malloc(get_value.ulValueLen);
 	if (get_value.pValue == NULL) {
 		fail_msg("malloc failed");
+		destroy_tmp_object(info, newkey);
 		return 0;
 	}
 
 	rv = fp->C_GetAttributeValue(info->session_handle, newkey,
 		&get_value, 1);
+	destroy_tmp_object(info, newkey);
 	if (rv != CKR_OK) {
 		fail_msg("C_GetAttributeValue: rv = 0x%.8lX\n", rv);
 		return 0;
@@ -89,6 +98,7 @@ pkcs11_derive(test_cert_t *o, token_info_t * info,
 
 int test_derive_x25519(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 {
+#ifdef EVP_PKEY_X25519
 	unsigned char *secret = NULL, *pkcs11_secret = NULL;
 	EVP_PKEY_CTX *pctx = NULL;
 	EVP_PKEY *pkey = NULL; /* This is peer key */
@@ -143,7 +153,7 @@ int test_derive_x25519(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 		return 1;
 	}
 
-	rc = EVP_PKEY_derive_set_peer(pctx, o->key.pkey);
+	rc = EVP_PKEY_derive_set_peer(pctx, o->key);
 	if (rc != 1) {
 		debug_print(" [ KEY %s ] EVP_PKEY_derive_set_peer failed", o->id_str);
 		EVP_PKEY_CTX_free(pctx);
@@ -186,6 +196,7 @@ int test_derive_x25519(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 	rc = EVP_PKEY_get_raw_public_key(pkey, pub, &pub_len);
 	if (rc != 1) {
 		debug_print(" [ KEY %s ] EVP_PKEY_get_raw_public_key failed", o->id_str);
+		free(pub);
 		EVP_PKEY_free(pkey);
 		free(secret);
 		return 1;
@@ -196,6 +207,7 @@ int test_derive_x25519(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 	if (secret_len == pkcs11_secret_len && memcmp(secret, pkcs11_secret, secret_len) == 0) {
 		mech->result_flags |= FLAGS_DERIVE;
 		debug_print(" [ OK %s ] Derived secrets match", o->id_str);
+		free(pub);
 		EVP_PKEY_free(pkey);
 		free(secret);
 		free(pkcs11_secret);
@@ -208,30 +220,40 @@ int test_derive_x25519(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 	free(secret);
 	free(pkcs11_secret);
 	return 1;
+#else
+	return 0;
+#endif
 }
 
 int test_derive(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 {
-	int nid, field_size;
-	EC_KEY *key = NULL;
-	const EC_POINT *publickey = NULL;
-	const EC_GROUP *group = NULL;
 	unsigned char *secret = NULL, *pkcs11_secret = NULL;
 	unsigned char *pub = NULL;
 	size_t pub_len = 0, secret_len = 0, pkcs11_secret_len = 0;
+	int rv = 1;
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+	int nid = 0;
+	EC_GROUP *group = NULL;
+	const EC_POINT *publickey = NULL;
+	EC_KEY *key = NULL;
+#endif
+	EVP_PKEY_CTX *pctx = NULL;
+	EVP_PKEY *evp_pkey = NULL;
 
 	if (o->private_handle == CK_INVALID_HANDLE) {
 		debug_print(" [SKIP %s ] Missing private key", o->id_str);
 		return 1;
 	}
 
-	if (o->type != EVP_PK_EC) {
+	if (o->type != EVP_PKEY_EC) {
 		debug_print(" [ KEY %s ] Skip non-EC key for derive", o->id_str);
 		return 1;
 	}
 
 	debug_print(" [ KEY %s ] Trying EC derive using CKM_%s and %lu-bit key",
 	o->id_str, get_mechanism_name(mech->mech), o->bits);
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
 	if (o->bits == 256)
 		nid = NID_X9_62_prime256v1;
 	else if (o->bits == 384)
@@ -242,87 +264,130 @@ int test_derive(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 		debug_print(" [ KEY %s ] Skip key of unknown size", o->id_str);
 		return 1;
 	}
+#endif
 
 	/* Generate the peer private key */
-	if ((key = EC_KEY_new_by_curve_name(nid)) == NULL ||
-			EC_KEY_generate_key(key) != 1) {
-		debug_print(" [ KEY %s ] Failed to generate peer private key", o->id_str);
-		EC_KEY_free(key);
+	if ((pctx = EVP_PKEY_CTX_new(o->key, NULL)) == NULL) {
+		debug_print(" [ KEY %s ] EVP_PKEY_CTX_new_id failed", o->id_str);
 		return 1;
 	}
 
-	/* Calculate the size of the buffer for the shared secret */
-	field_size = EC_GROUP_get_degree(EC_KEY_get0_group(key));
-	secret_len = (field_size+7)/8;
+	if (EVP_PKEY_keygen_init(pctx) != 1) {
+		debug_print(" [ KEY %s ] EVP_PKEY_keygen_init failed", o->id_str);
+		EVP_PKEY_CTX_free(pctx);
+		return 1;
+	}
 
+	if (EVP_PKEY_keygen(pctx, &evp_pkey) != 1) {
+		debug_print(" [ KEY %s ] EVP_PKEY_keygen failed", o->id_str);
+		EVP_PKEY_CTX_free(pctx);
+		return 1;
+	}
+	EVP_PKEY_CTX_free(pctx);
+
+	/* Start with key derivation in OpenSSL*/
+	pctx = EVP_PKEY_CTX_new(evp_pkey, NULL);
+	if (pctx == NULL ||
+		EVP_PKEY_derive_init(pctx) != 1 ||
+		EVP_PKEY_derive_set_peer(pctx, o->key) != 1) {
+		debug_print(" [ KEY %s ] Cannot derive key", o->id_str);
+		EVP_PKEY_free(evp_pkey);
+		return 1;
+	}
+
+	/* Get buffer length */
+	if (EVP_PKEY_derive(pctx, NULL, &secret_len) != 1) {
+		debug_print(" [ KEY %s ] EVP_PKEY_derive failed", o->id_str);
+		EVP_PKEY_CTX_free(pctx);
+		EVP_PKEY_free(evp_pkey);
+		return 1;
+	}
 	/* Allocate the memory for the shared secret */
-	if ((secret = OPENSSL_malloc(secret_len)) == NULL) {
+	if ((secret = malloc(secret_len)) == NULL) {
 		debug_print(" [ KEY %s ] Failed to allocate memory for secret", o->id_str);
-		EC_KEY_free(key);
+		EVP_PKEY_CTX_free(pctx);
+		EVP_PKEY_free(evp_pkey);
 		return 1;
 	}
 
-	/* Derive the shared secret locally */
-	secret_len = ECDH_compute_key(secret, secret_len,
-		EC_KEY_get0_public_key(o->key.ec), key, NULL);
+	if (EVP_PKEY_derive(pctx, secret, &secret_len) != 1) {
+		debug_print(" [ KEY %s ] EVP_PKEY_derive failed", o->id_str);
+		EVP_PKEY_CTX_free(pctx);
+		EVP_PKEY_free(evp_pkey);
+		free(secret);
+		return 1;
+	}
+	EVP_PKEY_CTX_free(pctx);
 
 	/* Try to do the same with the card key */
 
-	/* Convert the public key to the octet string */
-	group = EC_KEY_get0_group(key);
+	/* Get length of pub */
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+	group = EC_GROUP_new_by_curve_name(nid);
+	key = EVP_PKEY_get0_EC_KEY(evp_pkey);
 	publickey = EC_KEY_get0_public_key(key);
+
 	pub_len = EC_POINT_point2oct(group, publickey,
 		POINT_CONVERSION_UNCOMPRESSED, NULL, 0, NULL);
+#else
+	EVP_PKEY_get_octet_string_param(evp_pkey, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY, NULL, 0, &pub_len);
+#endif
+	/* Allocate memory for public key*/
 	if (pub_len == 0) {
 		debug_print(" [ KEY %s ] Failed to allocate memory for secret", o->id_str);
-		EC_KEY_free(key);
-		OPENSSL_free(secret);
-		return 1;
-	}
-	pub = malloc(pub_len);
-	if (pub == NULL) {
-		debug_print(" [ OK %s ] Failed to allocate memory", o->id_str);
-		EC_KEY_free(key);
-		OPENSSL_free(secret);
-		return 1;
-	}
-	pub_len = EC_POINT_point2oct(group, publickey,
-		POINT_CONVERSION_UNCOMPRESSED, pub, pub_len, NULL);
-	if (pub_len == 0) {
-		debug_print(" [ KEY %s ] Failed to allocate memory for secret", o->id_str);
-		EC_KEY_free(key);
-		OPENSSL_free(secret);
-		free(pub);
+		free(secret);
+		EVP_PKEY_free(evp_pkey);
 		return 1;
 	}
 
+	pub = malloc(pub_len);
+	if (pub == NULL) {
+		debug_print(" [ OK %s ] Failed to allocate memory", o->id_str);
+		free(secret);
+		EVP_PKEY_free(evp_pkey);
+		return 1;
+	}
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+	pub_len = EC_POINT_point2oct(group, publickey,
+		POINT_CONVERSION_UNCOMPRESSED, pub, pub_len, NULL);
+	EC_GROUP_free(group);
+	if (pub_len == 0) {
+#else
+	if (EVP_PKEY_get_octet_string_param(evp_pkey, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY, pub, pub_len, NULL) != 1) {
+#endif
+		debug_print(" [ KEY %s ] Cannot get public key", o->id_str);
+		EVP_PKEY_free(evp_pkey);
+		free(secret);
+		free(pub);
+		return 1;
+	}
+	EVP_PKEY_free(evp_pkey);
+
 	pkcs11_secret_len = pkcs11_derive(o, info, pub, pub_len, mech, &pkcs11_secret);
-	free(pub);
 
 	if (secret_len == pkcs11_secret_len && memcmp(secret, pkcs11_secret, secret_len) == 0) {
 		mech->result_flags |= FLAGS_DERIVE;
 		debug_print(" [ OK %s ] Derived secrets match", o->id_str);
-		OPENSSL_free(secret);
-		free(pkcs11_secret);
-		return 0;
+		rv = 0;
+	} else {
+		debug_print(" [ KEY %s ] Derived secret does not match", o->id_str);
 	}
 
-	debug_print(" [ KEY %s ] Derived secret does not match", o->id_str);
-	OPENSSL_free(secret);
+	free(pub);
+	free(secret);
 	free(pkcs11_secret);
-	return 1;
+	return rv;
 }
 
 
 void derive_tests(void **state) {
 	unsigned int i;
-	int j;
+	size_t j;
 	int errors = 0;
 	token_info_t *info = (token_info_t *) *state;
-
 	test_certs_t objects;
-	objects.count = 0;
-	objects.data = NULL;
+
+	test_certs_init(&objects);
 
 	P11TEST_START(info);
 	search_for_all_objects(&objects, info);
@@ -331,22 +396,21 @@ void derive_tests(void **state) {
 	for (i = 0; i < objects.count; i++) {
 		test_cert_t *o = &objects.data[i];
 		/* Ignore if there is missing private key */
-		if (objects.data[i].private_handle == CK_INVALID_HANDLE)
+		if (o->private_handle == CK_INVALID_HANDLE) {
 			continue;
+		}
 
 		for (j = 0; j < o->num_mechs; j++) {
-			if ((o->mechs[j].usage_flags & CKF_DERIVE) == 0
-				|| ! o->derive_priv)
+			if ((o->mechs[j].usage_flags & CKF_DERIVE) == 0 || !o->derive_priv) {
 				continue;
+			}
 
 			switch (o->key_type) {
 			case CKK_EC:
-				errors += test_derive(&(objects.data[i]), info,
-					&(o->mechs[j]));
+				errors += test_derive(o, info, &(o->mechs[j]));
 				break;
 			case CKK_EC_MONTGOMERY:
-				errors += test_derive_x25519(&(objects.data[i]), info,
-					&(o->mechs[j]));
+				errors += test_derive_x25519(o, info, &(o->mechs[j]));
 				break;
 			default:
 				/* Other keys do not support derivation */
@@ -357,7 +421,7 @@ void derive_tests(void **state) {
 
 	/* print summary */
 	printf("[KEY ID] [LABEL]\n");
-	printf("[ TYPE ] [ SIZE ]  [ PUBLIC ] [  DERIVE  ]\n");
+	printf("[ TYPE ] [ SIZE ] [ PUBLIC ] [  DERIVE  ]\n");
 	P11TEST_DATA_ROW(info, 3,
 		's', "KEY ID",
 		's', "MECHANISM",
@@ -371,7 +435,7 @@ void derive_tests(void **state) {
 		printf("\n[%-6s] [%s]\n",
 			o->id_str,
 			o->label);
-		printf("[ %s ] [%6lu] [  %s  ]  [ %s%s ]\n",
+		printf("[ %s ] [%6lu] [  %s  ] [ %s%s ]\n",
 			(o->key_type == CKK_EC ? " EC " :
 				o->key_type == CKK_EC_MONTGOMERY ? "EC_M" : " ?? "),
 			o->bits,
@@ -391,19 +455,19 @@ void derive_tests(void **state) {
 				/* not applicable mechanisms are skipped */
 				continue;
 			}
-			printf("  [ %-23s ] [   %s   ]\n",
+			printf("  [ %-22s ] [   %s   ]\n",
 				get_mechanism_name(mech->mech),
 				mech->result_flags & FLAGS_DERIVE ? "[./]" : "    ");
 			if ((mech->result_flags & FLAGS_DERIVE) == 0)
 				continue; /* skip empty rows for export */
-			P11TEST_DATA_ROW(info, 4,
+			P11TEST_DATA_ROW(info, 3,
 				's', o->id_str,
 				's', get_mechanism_name(mech->mech),
 				's', mech->result_flags & FLAGS_DERIVE ? "YES" : "");
 		}
 	}
-	printf(" Public == Cert -----^          ^\n");
-	printf(" ECDH Derive functionality -----'\n");
+	printf(" Public == Cert -----^            ^\n");
+	printf(" ECDH Derive functionality -------'\n");
 
 	clean_all_objects(&objects);
 	if (errors > 0)

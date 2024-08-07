@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -154,7 +154,7 @@ static int sc_hsm_determine_free_id(struct sc_pkcs15_card *p15card, u8 range)
 
 
 
-static int sc_hsm_encode_gakp_rsa(struct sc_pkcs15_card *p15card, sc_cvc_t *cvc, int keysize) {
+static int sc_hsm_encode_gakp_rsa(struct sc_pkcs15_card *p15card, sc_cvc_t *cvc, size_t keysize) {
 	struct sc_object_id rsa15withSHA256 = { { 0,4,0,127,0,7,2,2,2,1,2,-1 } };
 
 	LOG_FUNC_CALLED(p15card->card->ctx);
@@ -167,7 +167,7 @@ static int sc_hsm_encode_gakp_rsa(struct sc_pkcs15_card *p15card, sc_cvc_t *cvc,
 	memcpy(cvc->coefficientAorExponent, pubexp, sizeof(pubexp));
 
 	cvc->pukoid = rsa15withSHA256;
-	cvc->modulusSize = keysize;
+	cvc->modulusSize = (int)keysize;
 
 	LOG_FUNC_RETURN(p15card->card->ctx, SC_SUCCESS);
 }
@@ -265,8 +265,11 @@ static int sc_hsm_generate_key(struct sc_profile *profile, struct sc_pkcs15_card
 	memset(&cvc, 0, sizeof(cvc));
 
 	strlcpy(cvc.car, "UTCA00001", sizeof cvc.car);
-	strlcpy(cvc.chr, priv->serialno, sizeof cvc.chr);
+	cvc.carLen = strlen(cvc.car);
+	if (priv->serialno)
+		strlcpy(cvc.chr, priv->serialno, sizeof cvc.chr);
 	strlcat(cvc.chr, "00001", sizeof cvc.chr);
+	cvc.chrLen = strlen(cvc.chr);
 
 	switch(object->type) {
 	case SC_PKCS15_TYPE_PRKEY_RSA:

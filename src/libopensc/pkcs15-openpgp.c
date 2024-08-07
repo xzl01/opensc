@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -32,6 +32,7 @@
 #include "internal.h"
 #include "pkcs15.h"
 #include "log.h"
+#include "card-openpgp.h"
 
 static int sc_pkcs15emu_openpgp_add_data(sc_pkcs15_card_t *);
 
@@ -44,6 +45,7 @@ static int sc_pkcs15emu_openpgp_add_data(sc_pkcs15_card_t *);
 				| SC_PKCS15_PIN_FLAG_SO_PIN)
 
 #define PGP_NUM_PRIVDO       4
+#define PGP_MAX_NUM_CERTS    3
 
 typedef struct _pgp_pin_cfg {
 	const char	*label;
@@ -53,6 +55,7 @@ typedef struct _pgp_pin_cfg {
 	int		do_index;
 } pgp_pin_cfg_t;
 
+// clang-format off
 /* OpenPGP cards v1:
  * "Signature PIN2 & "Encryption PIN" are two different PINs - not sync'ed by hardware
  */
@@ -69,6 +72,7 @@ static const pgp_pin_cfg_t	pin_cfg_v2[3] = {
 	{ "User PIN (sig)", 0x01, PGP_USER_PIN_FLAGS,  6, 0 },	// used for PSO:CDS
 	{ "Admin PIN",      0x03, PGP_ADMIN_PIN_FLAGS, 8, 2 }
 };
+// clang-format on
 
 static struct sc_object_id curve25519_oid = {{1, 3, 6, 1, 4, 1, 3029, 1, 5, 1, -1}};
 
@@ -93,18 +97,34 @@ typedef	struct _pgp_key_cfg {
 	int		pubkey_usage;
 } pgp_key_cfg_t;
 
+typedef struct cdata_st {
+	const char *label;
+	int	    authority;
+	const char *path;
+	const char *id;
+	int         obj_flags;
+} cdata;
+
+// clang-format off
 static const pgp_key_cfg_t key_cfg[3] = {
 	{ "Signature key",      "B601", 1, PGP_SIG_PRKEY_USAGE,  PGP_SIG_PUBKEY_USAGE  },
 	{ "Encryption key",     "B801", 2, PGP_ENC_PRKEY_USAGE,  PGP_ENC_PUBKEY_USAGE  },
 	{ "Authentication key", "A401", 2, PGP_AUTH_PRKEY_USAGE | PGP_ENC_PRKEY_USAGE, PGP_AUTH_PUBKEY_USAGE | PGP_ENC_PUBKEY_USAGE }
 };
 
+static const cdata certs[PGP_MAX_NUM_CERTS] = {
+	{"AUT certificate", 0, "3F007F21", "3", SC_PKCS15_CO_FLAG_MODIFIABLE},
+	{"DEC certificate", 0, "3F007F21", "2", SC_PKCS15_CO_FLAG_MODIFIABLE},
+	{"SIG certificate", 0, "3F007F21", "1", SC_PKCS15_CO_FLAG_MODIFIABLE}
+};
+// clang-format on
 
 typedef struct _pgp_manuf_map {
 	unsigned short		id;
 	const char	*name;
 } pgp_manuf_map_t;
 
+// clang-format off
 static const pgp_manuf_map_t manuf_map[] = {
 	{ 0x0001, "PPC Card Systems"		},
 	{ 0x0002, "Prism"			},
@@ -132,6 +152,7 @@ static const pgp_manuf_map_t manuf_map[] = {
 	{ 0xffff, "test card"			},
 	{ 0, NULL }
 };
+// clang-format on
 
 /*
  * This function pretty much follows what find_tlv in the GNUpg
@@ -161,6 +182,7 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 {
 	sc_card_t	*card = p15card->card;
 	sc_context_t	*ctx = card->ctx;
+	struct pgp_priv_data *priv = DRVDATA(card);
 	char		string[256];
 	u8		c4data[10];
 	u8		c5data[100];
@@ -210,9 +232,9 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 	if ((r = read_file(card, "006E:0073:00C4", c4data, sizeof(c4data))) < 0)
 		goto failed;
 	if (r != 7) {
-		sc_log(ctx, 
-			"CHV status bytes have unexpected length (expected 7, got %d)\n", r);
-		return SC_ERROR_OBJECT_NOT_VALID;
+		sc_log(ctx, "CHV status bytes have unexpected length (expected 7, got %d)\n", r);
+		r = SC_ERROR_OBJECT_NOT_VALID;
+		goto failed;
 	}
 
 	/* Add PIN codes */
@@ -246,8 +268,10 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 		}
 
 		r = sc_pkcs15emu_add_pin_obj(p15card, &pin_obj, &pin_info);
-		if (r < 0)
-			return SC_ERROR_INTERNAL;
+		if (r < 0) {
+			r = SC_ERROR_INTERNAL;
+			goto failed;
+		}
 	}
 
 	/* Get private key finger prints from DO 006E/0073/00C5:
@@ -261,7 +285,8 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 	if (r < 60) {
 		sc_log(ctx,
 			"finger print bytes have unexpected length (expected 60, got %d)\n", r);
-		return SC_ERROR_OBJECT_NOT_VALID;
+		r = SC_ERROR_OBJECT_NOT_VALID;
+		goto failed;
 	}
 
 	sc_log(ctx, "Adding private keys");
@@ -378,6 +403,10 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 
 			case SC_OPENPGP_KEYALGO_RSA:
 				if (cxdata_len >= 3) {
+					/* with Authentication key, can only decrypt if can change MSE */
+					if (i == 2 && !(priv->ext_caps & EXT_CAP_MSE)) {
+						prkey_info.usage &= ~PGP_ENC_PRKEY_USAGE;
+					}
 					prkey_info.modulus_length = bebytes2ushort(cxdata + 1);
 					r = sc_pkcs15emu_add_rsa_prkey(p15card, &prkey_obj, &prkey_info);
 					break;
@@ -388,8 +417,10 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 					cxdata[0], r);
 			}
 
-			if (r < 0)
-				return SC_ERROR_INTERNAL;
+			if (r < 0) {
+				r = SC_ERROR_INTERNAL;
+				goto failed;
+			}
 		}
 	}
 
@@ -500,6 +531,10 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 				break;
 			case SC_OPENPGP_KEYALGO_RSA:
 				if (cxdata_len >= 3) {
+					/* with Authentication pubkey, can only encrypt if can change MSE */
+					if (i == 2 && !(priv->ext_caps & EXT_CAP_MSE)) {
+						pubkey_info.usage &= ~PGP_ENC_PUBKEY_USAGE;
+					}
 					pubkey_info.modulus_length = bebytes2ushort(cxdata + 1);
 					r = sc_pkcs15emu_add_rsa_pubkey(p15card, &pubkey_obj, &pubkey_info);
 					break;
@@ -510,8 +545,10 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 					cxdata[0], r);
 			}
 
-			if (r < 0)
-				return SC_ERROR_INTERNAL;
+			if (r < 0) {
+				r = SC_ERROR_INTERNAL;
+				goto failed;
+			}
 		}
 	}
 
@@ -521,26 +558,58 @@ sc_pkcs15emu_openpgp_init(sc_pkcs15_card_t *p15card)
 	if (r < 0)
 		goto failed;
 
-	/* If DO 7F21 holds data, we declare a cert object for pkcs15 */
-	if (file->size > 0) {
+	for(u8 i=0; i<PGP_MAX_NUM_CERTS; i++) {
 		struct sc_pkcs15_cert_info cert_info;
 		struct sc_pkcs15_object    cert_obj;
+		u8* buffer = malloc(MAX_OPENPGP_DO_SIZE);
+		int resp_len = 0;
+
+		if (buffer == NULL)
+			goto failed;
 
 		memset(&cert_info, 0, sizeof(cert_info));
 		memset(&cert_obj,  0, sizeof(cert_obj));
 
+		/* try to SELECT DATA. Will only work for OpenPGP >= v3, errors are non-critical */
+		sc_card_ctl(card, SC_CARDCTL_OPENPGP_SELECT_DATA, &i);
+
+		sc_format_path(certs[i].path, &cert_info.path);
+
 		/* Certificate ID. We use the same ID as the authentication key */
-		cert_info.id.value[0] = 3;
-		cert_info.id.len = 1;
-		/* Authority, flag is zero */
-		/* The path following which PKCS15 will find the content of the object */
-		sc_format_path("3F007F21", &cert_info.path);
+		sc_pkcs15_format_id(certs[i].id, &cert_info.id);
+
+		resp_len = sc_get_data(card, 0x7F21, buffer, MAX_OPENPGP_DO_SIZE);
+
+		/* Response length => free buffer and continue with next id */
+		if (resp_len == 0) {
+			free(buffer);
+			continue;
+		}
+
+		/* Catch error during sc_get_data */
+		if (resp_len < 0) {
+			free(buffer);
+			goto failed;
+		}
+
+		/* Assemble certificate info struct, based on `certs` array */
+		cert_info.value.len = resp_len;
+		cert_info.value.value = buffer;
+		cert_info.authority = certs[i].authority;
+		cert_obj.flags = certs[i].obj_flags;
+
 		/* Object label */
-		strlcpy(cert_obj.label, "Cardholder certificate", sizeof(cert_obj.label));
+		strlcpy(cert_obj.label, certs[i].label, sizeof(cert_obj.label));
 
 		r = sc_pkcs15emu_add_x509_cert(p15card, &cert_obj, &cert_info);
-		if (r < 0)
+		if (r < 0) {
+			free(buffer);
 			goto failed;
+		}
+
+		/* only iterate, for OpenPGP >= v3, thus break on < v3 */
+		if (card->type < SC_CARD_TYPE_OPENPGP_V3)
+			break;
 	}
 
 	/* Add PKCS#15 DATA objects from other OpenPGP card DOs. The return
@@ -553,9 +622,9 @@ failed:
 		sc_log(card->ctx,
 				"Failed to initialize OpenPGP emulation: %s\n",
 				sc_strerror(r));
+		sc_pkcs15_card_clear(p15card);
 	}
 	sc_file_free(file);
-
 	LOG_FUNC_RETURN(ctx, r);
 }
 

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef PKCS15_SYN_H
@@ -29,15 +29,12 @@ extern "C" {
 #include <libopensc/types.h>
 #include <libopensc/pkcs15.h>
 
-int sc_pkcs15emu_westcos_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_openpgp_init_ex(sc_pkcs15_card_t *,	struct sc_aid *);
 int sc_pkcs15emu_starcert_init_ex(sc_pkcs15_card_t *,	struct sc_aid *);
 int sc_pkcs15emu_tcos_init_ex(sc_pkcs15_card_t *,	struct sc_aid *);
-int sc_pkcs15emu_esteid_init_ex(sc_pkcs15_card_t *,	struct sc_aid *);
 int sc_pkcs15emu_esteid2018_init_ex(sc_pkcs15_card_t *,	struct sc_aid *);
 int sc_pkcs15emu_piv_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_cac_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
-int sc_pkcs15emu_gemsafeGPK_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_gemsafeV1_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_actalis_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_atrust_acos_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
@@ -55,6 +52,10 @@ int sc_pkcs15emu_coolkey_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_din_66291_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_idprime_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
 int sc_pkcs15emu_cardos_init_ex(sc_pkcs15_card_t *p15card,	struct sc_aid *);
+int sc_pkcs15emu_nqapplet_init_ex(sc_pkcs15_card_t *p15card, struct sc_aid *);
+int sc_pkcs15emu_starcos_esign_init_ex(sc_pkcs15_card_t *p15card, struct sc_aid *);
+int sc_pkcs15emu_skeid_init_ex(sc_pkcs15_card_t *p15card, struct sc_aid *);
+int sc_pkcs15emu_eoi_init_ex(sc_pkcs15_card_t *p15card, struct sc_aid *);
 
 struct sc_pkcs15_emulator_handler {
 	const char *name;

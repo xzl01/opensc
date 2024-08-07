@@ -15,19 +15,19 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-#ifdef ENABLE_OPENPACE
 #include "fread_to_eof.h"
 #include "npa-tool-cmdline.h"
 #include "sm/sm-eac.h"
 #include "sm/sslutil.h"
 #include "util.h"
 #include <eac/pace.h>
+#include <eac/objects.h>
 #include <libopensc/card-npa.h>
 #include <libopensc/log.h>
 #include <libopensc/opensc.h>
@@ -258,7 +258,11 @@ static int add_to_ASN1_AUXILIARY_DATA_NPA_TOOL(
 		goto err;
 	}
 
+#ifndef HAVE_EAC_OBJ_NID2OBJ
 	template->type = OBJ_nid2obj(nid);
+#else
+	template->type = EAC_OBJ_nid2obj(nid);
+#endif
 	if (!template->type) {
 		r = SC_ERROR_INTERNAL;
 		goto err;
@@ -366,8 +370,6 @@ main (int argc, char **argv)
 	}
 	if (cmdline.tr_03110v201_flag)
 		tr_version = EAC_TR_VERSION_2_01;
-	if (cmdline.disable_all_checks_flag)
-		eac_default_flags |= EAC_FLAG_DISABLE_CHECK_ALL;
 	if (cmdline.disable_ta_checks_flag)
 		eac_default_flags |= EAC_FLAG_DISABLE_CHECK_TA;
 	if (cmdline.disable_ca_checks_flag)
@@ -377,6 +379,9 @@ main (int argc, char **argv)
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = cmdline.verbose_given;
+	if (cmdline.verbose_given)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -388,7 +393,7 @@ main (int argc, char **argv)
 	if (r)
 		goto err;
 
-	r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0, cmdline.verbose_given);
+	r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0);
 	if (r)
 		goto err;
 
@@ -570,9 +575,9 @@ main (int argc, char **argv)
 				exit(1);
 			}
 
-			certs = calloc(sizeof *certs, cmdline.cv_certificate_given + 1);
-			certs_lens = calloc(sizeof *certs_lens,
-					cmdline.cv_certificate_given + 1);
+			certs = calloc(cmdline.cv_certificate_given + 1, sizeof *certs);
+			certs_lens = calloc(cmdline.cv_certificate_given + 1,
+					 sizeof *certs_lens);
 			if (!certs || !certs_lens) {
 				r = SC_ERROR_OUT_OF_MEMORY;
 				goto err;
@@ -858,10 +863,4 @@ err:
 
 	return -r;
 }
-#else
-int
-main (int argc, char **argv)
-{
-	return 1;
-}
-#endif
+

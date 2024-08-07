@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -57,16 +57,6 @@ static struct {
 	// secp384r1
 	{384, {{1, 3, 132, 0, 34, -1}}}
 };
-
-
-static void edo_eac_init() {
-	extern void EAC_init(void);
-	static int initialized = 0;
-	if (!initialized) {
-		EAC_init();
-		initialized = 1;
-	}
-}
 
 
 static int edo_match_card(sc_card_t* card) {
@@ -291,8 +281,6 @@ static int edo_set_security_env(struct sc_card* card, const struct sc_security_e
 static int edo_init(sc_card_t* card) {
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
-	edo_eac_init();
-
 	memset(&card->sm_ctx, 0, sizeof card->sm_ctx);
 
 	card->max_send_size = SC_MAX_APDU_RESP_SIZE;
@@ -314,6 +302,12 @@ static int edo_init(sc_card_t* card) {
 }
 
 
+static int edo_logout(sc_card_t* card) {
+	sc_sm_stop(card);
+	return edo_unlock(card);
+}
+
+
 struct sc_card_driver* sc_get_edo_driver(void) {
 	edo_ops = *sc_get_iso7816_driver()->ops;
 	edo_ops.match_card = edo_match_card;
@@ -321,6 +315,7 @@ struct sc_card_driver* sc_get_edo_driver(void) {
 	edo_ops.select_file = edo_select_file;
 	edo_ops.set_security_env = edo_set_security_env;
 	edo_ops.compute_signature = edo_compute_signature;
+	edo_ops.logout = edo_logout;
 
 	return &edo_drv;
 }

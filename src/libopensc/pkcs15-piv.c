@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2005,2006,2007,2008,2009,2010
  *               Douglas E. Engert <deengert@anl.gov>
+ * Copyright (C) 2020 Douglas E. Engert <deengert@gmail.com>
  *               2004, Nils Larsch <larsch@trustcenter.de>
  * Copyright (C) 2006, Identity Alliance,
  *               Thomas Harning <thomas.harning@identityalliance.com>
@@ -21,7 +22,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -100,8 +101,8 @@ typedef struct common_key_info_st {
 	int cert_found;
 	int pubkey_found;
 	int pubkey_from_file;
-	int key_alg;
-	unsigned int pubkey_len;
+	unsigned long key_alg;
+	size_t pubkey_len;
 	unsigned int cert_keyUsage; /* x509 key usage as defined in certificate */
 	int cert_keyUsage_present; /* 1 if keyUsage found in certificate */
 	int pub_usage;
@@ -144,6 +145,8 @@ static int piv_get_guid(struct sc_pkcs15_card *p15card, const struct sc_pkcs15_o
 	r = sc_card_ctl(p15card->card, SC_CARDCTL_GET_SERIALNR, &serialnr);
 	if (r)
 		return r;
+	if (serialnr.len > SC_MAX_SERIALNR)
+		return SC_ERROR_INTERNAL;
 
 	memset(guid_bin, 0, sizeof(guid_bin));
 	memset(out, 0, *out_size);
@@ -204,7 +207,7 @@ static int piv_get_guid(struct sc_pkcs15_card *p15card, const struct sc_pkcs15_o
 		 */
 		memcpy(guid_bin, id.value, id.len);
 		memcpy(guid_bin + id.len, serialnr.value + 1, serialnr.len - 1);
-		
+
 		tlen = id.len + serialnr.len - 1; /* i.e. 16 */
 	} else {
 		/* not what was expected...  use default */
@@ -234,8 +237,8 @@ static int piv_detect_card(sc_pkcs15_card_t *p15card)
 	sc_card_t *card = p15card->card;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	if (card->type < SC_CARD_TYPE_PIV_II_GENERIC
-		|| card->type >= SC_CARD_TYPE_PIV_II_GENERIC+1000)
+	if (card->type < SC_CARD_TYPE_PIV_II_BASE
+		|| card->type >= SC_CARD_TYPE_PIV_II_BASE + 1000)
 		return SC_ERROR_INVALID_CARD;
 	return SC_SUCCESS;
 }
@@ -318,21 +321,31 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 			"2.16.840.1.101.3.7.2.16.19", NULL, "1013", 0},
 	{"34", "Retired X.509 Certificate for Key Management 20",
 			"2.16.840.1.101.3.7.2.16.20", NULL, "1014", 0},
+	/* new in 800-73-4 */
+	{"35", "Biometric Information Templates Group Template",
+			"2.16.840.1.101.3.7.2.16.22", NULL, "1016", 0},
+	{"36", "Secure Messaging Certificate Signer",
+			"2.16.840.1.101.3.7.2.16.23", NULL, "1017", 0},
+	{"37", "Pairing Code Reference Data Container",
+			"2.16.840.1.101.3.7.2.16.24", NULL, "1018", SC_PKCS15_CO_FLAG_PRIVATE},
 	{NULL, NULL, NULL, NULL, NULL, 0}
 	};
 	// clang-format on
-	/*
-	 * NIST 800-73-1 lifted the restriction on
+	/* NIST 800-73-1 lifted the restriction on
 	 * requiring pin protected certs. Thus the default is to
 	 * not require this.
+	 *
+	 * Certs will be pulled out from the cert objects
+	 * But there may be extra certs (SM Signer cert) that do
+	 * not have a private keys on the card. These certs must be last
 	 */
-	/* certs will be pulled out from the cert objects */
-	/* the number of cert, pubkey and prkey triplets */
 
-#define PIV_NUM_CERTS_AND_KEYS 24
+	/* Any certs on card without private key must be last */
+#define PIV_NUM_CERTS 25
+#define PIV_NUM_KEYS  24
 
 	// clang-format off
-	static const cdata certs[PIV_NUM_CERTS_AND_KEYS] = {
+	static const cdata certs[PIV_NUM_CERTS] = {
 		{"01", "Certificate for PIV Authentication", "0101cece", 0, 0},
 		{"02", "Certificate for Digital Signature", "0100cece", 0, 0},
 		{"03", "Certificate for Key Management", "0102cece", 0, 0},
@@ -356,7 +369,9 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		{"21", "Retired Certificate for Key Management 17", "1011cece", 0, 0},
 		{"22", "Retired Certificate for Key Management 18", "1012cece", 0, 0},
 		{"23", "Retired Certificate for Key Management 19", "1013cece", 0, 0},
-		{"24", "Retired Certificate for Key Management 20", "1014cece", 0, 0}
+		{"24", "Retired Certificate for Key Management 20", "1014cece", 0, 0},
+		/* Yubikey Attestation uses "25" but not read via GET_DATA */
+		{"81", "Secure Messaging Certificate Signer",   "1017cece", 0, 0} /* no keys on card */
 	};
 	// clang-format on
 
@@ -393,7 +408,7 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 	 * RSA and EC have different sets of usage
 	 */
 	// clang-format off
-	static const pubdata pubkeys[PIV_NUM_CERTS_AND_KEYS] = {
+	static const pubdata pubkeys[PIV_NUM_KEYS] = {
 		{ "01", "PIV AUTH pubkey",
 			 	/*RSA*/SC_PKCS15_PRKEY_USAGE_ENCRYPT |
 			 		SC_PKCS15_PRKEY_USAGE_WRAP |
@@ -503,11 +518,14 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 	// clang-format on
 
 /*
- * note some of the SC_PKCS15_PRKEY values are dependent
+ * Note some of the SC_PKCS15_PRKEY values are dependent
  * on the key algorithm, and will be reset.
+
+ * No SM Signer private Key on card
+ * The 04 SM ECC CVC pubkey is in response to SELECT AID
  */
 	// clang-format off
-	static const prdata prkeys[PIV_NUM_CERTS_AND_KEYS] = {
+	static const prdata prkeys[PIV_NUM_KEYS] = {
 		{ "01", "PIV AUTH key",
 				/*RSA*/SC_PKCS15_PRKEY_USAGE_DECRYPT |
 					SC_PKCS15_PRKEY_USAGE_UNWRAP |
@@ -612,6 +630,7 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 				/*RSA*/SC_PKCS15_PRKEY_USAGE_DECRYPT | SC_PKCS15_PRKEY_USAGE_UNWRAP,
 				/*EC*/SC_PKCS15_PRKEY_USAGE_DERIVE,
 			"", 0x95, "01", SC_PKCS15_CO_FLAG_PRIVATE, 0}
+		/* SM Signer certificate does not have private key on card */
 	};
 	// clang-format on
 
@@ -619,7 +638,7 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 	sc_card_t *card = p15card->card;
 	sc_serial_number_t serial;
 	char buf[SC_MAX_SERIALNR * 2 + 1];
-	common_key_info ckis[PIV_NUM_CERTS_AND_KEYS];
+	common_key_info ckis[PIV_NUM_CERTS];
 	int follows_nist_fascn = 0;
 	char *token_name = NULL;
 
@@ -669,37 +688,24 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		r = sc_card_ctl(card, SC_CARDCTL_PIV_OBJECT_PRESENT, &obj_info.path);
 		if (r == 1)
 			continue; /* Not on card, do not define the object */
-			
+
 		strncpy(obj_info.app_label, objects[i].label, SC_PKCS15_MAX_LABEL_SIZE - 1);
 		r = sc_format_oid(&obj_info.app_oid, objects[i].aoid);
 		if (r != SC_SUCCESS)
 			LOG_FUNC_RETURN(card->ctx, r);
 
+		/* We can not read all the objects, as some need the PIN! */
 		if (objects[i].auth_id)
 			sc_pkcs15_format_id(objects[i].auth_id, &obj_obj.auth_id);
 
 		strncpy(obj_obj.label, objects[i].label, SC_PKCS15_MAX_LABEL_SIZE - 1);
 		obj_obj.flags = objects[i].obj_flags;
-		
+
 		r = sc_pkcs15emu_object_add(p15card, SC_PKCS15_TYPE_DATA_OBJECT,
 			&obj_obj, &obj_info);
+
 		if (r < 0)
 			LOG_FUNC_RETURN(card->ctx, r);
-/* TODO
- * PIV key 9C requires the pin verify be done just before any
- * crypto operation using the key.
- *
- * Nss 3.12.7 does not check the CKA_ALWAYS_AUTHENTICATE attribute of a key
- * and will do a C_FindObjects with only CKA_VALUE looking for a certificate
- * it had found earlier after c_Login. The template does not add CKA_TYPE=cert.
- * This will cause the card-piv to read all the objects and will reset
- * the security status for the 9C key.
- * Mozilla Bug 357025
- * Mozilla Bug 613507
- * on 5/16/2012, both scheduled for NSS 3.14
- *
- * We can not read all the objects, as some need the PIN!
- */
 	}
 
 	/*
@@ -714,12 +720,13 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 	 */
 	/* set certs */
 	sc_log(card->ctx,  "PIV-II adding certs...");
-	for (i = 0; i < PIV_NUM_CERTS_AND_KEYS; i++) {
+	for (i = 0; i < PIV_NUM_CERTS; i++) {
 		struct sc_pkcs15_cert_info cert_info;
 		struct sc_pkcs15_object    cert_obj;
 		sc_pkcs15_der_t   cert_der;
 		sc_pkcs15_cert_t *cert_out = NULL;
-		
+		int private_obj;
+
 		ckis[i].cert_found = 0;
 		ckis[i].key_alg = -1;
 		ckis[i].pubkey_found = 0;
@@ -733,7 +740,7 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 
 		memset(&cert_info, 0, sizeof(cert_info));
 		memset(&cert_obj,  0, sizeof(cert_obj));
-	
+
 		sc_pkcs15_format_id(certs[i].id, &cert_info.id);
 		cert_info.authority = certs[i].authority;
 		sc_format_path(certs[i].path, &cert_info.path);
@@ -748,7 +755,8 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 			continue;
 		}
 
-		r = sc_pkcs15_read_file(p15card, &cert_info.path, &cert_der.value, &cert_der.len);
+		private_obj = cert_obj.flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_file(p15card, &cert_info.path, &cert_der.value, &cert_der.len, private_obj);
 
 		if (r) {
 			sc_log(card->ctx,  "No cert found,i=%d", i);
@@ -761,12 +769,13 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		if (cert_der.value) {
 			cert_info.value.value = cert_der.value;
 			cert_info.value.len = cert_der.len;
-			if (!p15card->opts.use_file_cache) {
+			if (!p15card->opts.use_file_cache
+			    || (private_obj && !(p15card->opts.use_file_cache & SC_PKCS15_OPTS_CACHE_ALL_FILES))) {
 				cert_info.path.len = 0; /* use in mem cert from now on */
 			}
 		}
 		/* following will find the cached cert in cert_info */
-		r =  sc_pkcs15_read_certificate(p15card, &cert_info, &cert_out);
+		r =  sc_pkcs15_read_certificate(p15card, &cert_info, private_obj, &cert_out);
 		if (r < 0 || cert_out == NULL || cert_out->key == NULL) {
 			sc_log(card->ctx,  "Failed to read/parse the certificate r=%d",r);
 			if (cert_out != NULL)
@@ -919,11 +928,13 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 				break;
 
 			default:
-				sc_log(card->ctx,  "Unsupported key.algorithm %d", cert_out->key->algorithm);
+				sc_log(card->ctx, "Unsupported key.algorithm %lu", cert_out->key->algorithm);
 				ckis[i].pubkey_len = 0; /* set some value for now */
 		}
-		ckis[i].pubkey_from_cert = cert_out->key;
-		cert_out->key = NULL;
+		if (i < PIV_NUM_KEYS) { /* Only save pub key if card can have private key */
+			ckis[i].pubkey_from_cert = cert_out->key;
+			cert_out->key = NULL;
+		}
 		sc_pkcs15_free_certificate(cert_out);
 
 		r = sc_pkcs15emu_add_x509_cert(p15card, &cert_obj, &cert_info);
@@ -953,8 +964,8 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		pin_info.attrs.pin.stored_length = pins[i].storedlen;
 		pin_info.attrs.pin.max_length    = pins[i].maxlen;
 		pin_info.attrs.pin.pad_char      = pins[i].pad_char;
+		pin_info.tries_left              = pins[i].tries_left;
 		sc_format_path(pins[i].path, &pin_info.path);
-		pin_info.tries_left    = -1;
 
 		label = pins[i].label;
 		if (i == 0 &&
@@ -965,7 +976,6 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 			pin_info.attrs.pin.flags &= ~SC_PKCS15_PIN_FLAG_LOCAL;
 			label = "Global PIN";
 		}
-sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 		strncpy(pin_obj.label, label, SC_PKCS15_MAX_LABEL_SIZE - 1);
 		pin_obj.flags = pins[i].obj_flags;
 		if (i == 0 && pin_info.attrs.pin.reference == 0x80) {
@@ -987,7 +997,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 	 * at a later time. The piv-tool can stash  pubkey in file
 	 */
 	sc_log(card->ctx,  "PIV-II adding pub keys...");
-	for (i = 0; i < PIV_NUM_CERTS_AND_KEYS; i++) {
+	for (i = 0; i < PIV_NUM_KEYS; i++) {
 		struct sc_pkcs15_pubkey_info pubkey_info;
 		struct sc_pkcs15_object     pubkey_obj;
 		struct sc_pkcs15_pubkey *p15_key = NULL;
@@ -1005,7 +1015,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 		strncpy(pubkey_obj.label, pubkeys[i].label, SC_PKCS15_MAX_LABEL_SIZE - 1);
 
 		pubkey_obj.flags = pubkeys[i].obj_flags;
-		
+
 
 		if (pubkeys[i].auth_id)
 			sc_pkcs15_format_id(pubkeys[i].auth_id, &pubkey_obj.auth_id);
@@ -1018,9 +1028,9 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 		 */
 		if (ckis[i].cert_found == 0 ) { /*  no cert found */
 			char * filename = NULL;
-			
+
 			sc_log(card->ctx, "No cert for this pub key i=%d",i);
-			
+
 			/*
 			 * If we used the piv-tool to generate a key,
 			 * we would have saved the public key as a file.
@@ -1028,8 +1038,8 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 			 * After the certificate is loaded on the card,
 			 * the public key is extracted from the certificate.
 			 */
-	
-			
+
+
 			sc_log(card->ctx, "DEE look for env %s",
 					pubkeys[i].getenvname?pubkeys[i].getenvname:"NULL");
 
@@ -1040,7 +1050,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 			sc_log(card->ctx, "DEE look for file %s", filename?filename:"NULL");
 			if (filename == NULL)
 				continue;
-			
+
 			sc_log(card->ctx, "Adding pubkey from file %s",filename);
 
 			r = sc_pkcs15_pubkey_from_spki_file(card->ctx,  filename, &p15_key);
@@ -1052,7 +1062,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 			/* Lets also try another method. */
 			r = sc_pkcs15_encode_pubkey_as_spki(card->ctx, p15_key, &pubkey_info.direct.spki.value, &pubkey_info.direct.spki.len);
 			LOG_TEST_GOTO_ERR(card->ctx, r, "SPKI encode public key error");
-			
+
 			/* Only get here if no cert, and the the above found the
 			 * pub key file (actually the SPKI version). This only
 			 * happens when trying initializing a card and have set
@@ -1062,7 +1072,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 			 */
 
 			pubkey_info.path.len = 0;
-			
+
 			ckis[i].key_alg = p15_key->algorithm;
 			switch (p15_key->algorithm) {
 				case SC_ALGORITHM_RSA:
@@ -1078,7 +1088,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 					ckis[i].pubkey_from_file = 1;
 					break;
 				default:
-					sc_log(card->ctx, "Unsupported key_alg %d",p15_key->algorithm);
+					sc_log(card->ctx, "Unsupported key_alg %lu", p15_key->algorithm);
 					continue;
 			}
 			pubkey_obj.emulated = p15_key;
@@ -1093,7 +1103,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 			ckis[i].pubkey_from_cert = NULL;
 		}
 
-		sc_log(card->ctx, "adding pubkey for %d keyalg=%d",i, ckis[i].key_alg);
+		sc_log(card->ctx, "adding pubkey for %d keyalg=%lu", i, ckis[i].key_alg);
 		switch (ckis[i].key_alg) {
 			case SC_ALGORITHM_RSA:
 				if (ckis[i].cert_keyUsage_present) {
@@ -1127,17 +1137,17 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 				ckis[i].pubkey_found = 1;
 				break;
 			default:
-				sc_log(card->ctx, "key_alg %d not supported", ckis[i].key_alg);
+				sc_log(card->ctx, "key_alg %lu not supported", ckis[i].key_alg);
 				continue;
 		}
 		sc_log(card->ctx, "USAGE: cert_keyUsage_present:%d usage:0x%8.8x",
-				ckis[i].cert_keyUsage_present ,pubkey_info.usage);
+				ckis[i].cert_keyUsage_present, pubkey_info.usage);
 	}
 
 
 	/* set private keys */
 	sc_log(card->ctx,  "PIV-II adding private keys...");
-	for (i = 0; i < PIV_NUM_CERTS_AND_KEYS; i++) {
+	for (i = 0; i < PIV_NUM_KEYS; i++) {
 		struct sc_pkcs15_prkey_info prkey_info;
 		struct sc_pkcs15_object     prkey_obj;
 
@@ -1146,7 +1156,7 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 
 		if (ckis[i].cert_found == 0 && ckis[i].pubkey_found == 0)
 			continue; /* i.e. no cert or pubkey */
-		
+
 		sc_pkcs15_format_id(prkeys[i].id, &prkey_info.id);
 		prkey_info.native        = 1;
 		prkey_info.key_reference = prkeys[i].ref;
@@ -1198,15 +1208,15 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 					prkey_info.usage  |= prkeys[i].usage_ec;
 				}
 				prkey_info.field_length = ckis[i].pubkey_len;
-				sc_log(card->ctx,  "DEE added key_alg %2.2x prkey_obj.flags %8.8x",
+				sc_log(card->ctx, "DEE added key_alg %2.2lx prkey_obj.flags %8.8x",
 					 ckis[i].key_alg, prkey_obj.flags);
 				r = sc_pkcs15emu_add_ec_prkey(p15card, &prkey_obj, &prkey_info);
 				break;
 			default:
-				sc_log(card->ctx,  "Unsupported key_alg %d", ckis[i].key_alg);
+				sc_log(card->ctx, "Unsupported key_alg %lu", ckis[i].key_alg);
 				r = 0; /* we just skip this one */
 		}
-		sc_log(card->ctx, "USAGE: cert_keyUsage_present:%d usage:0x%8.8x", ckis[i].cert_keyUsage_present ,prkey_info.usage);
+		sc_log(card->ctx, "USAGE: cert_keyUsage_present:%d usage:0x%8.8x", ckis[i].cert_keyUsage_present, prkey_info.usage);
 		LOG_TEST_GOTO_ERR(card->ctx, r, "Failed to add Private key");
 	}
 
@@ -1214,9 +1224,10 @@ sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 
 	LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 err:
-	for (i = 0; i < PIV_NUM_CERTS_AND_KEYS; i++) {
+	for (i = 0; i < PIV_NUM_CERTS; i++) {
 		sc_pkcs15_free_pubkey(ckis[i].pubkey_from_cert);
 	}
+	sc_pkcs15_card_clear(p15card);
 	LOG_FUNC_RETURN(card->ctx, r);
 }
 

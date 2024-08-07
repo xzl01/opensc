@@ -1,4 +1,4 @@
-/* Copyright (C) 2001, 2002  Juha Yrjölä <juha.yrjola@iki.fi> 
+/* Copyright (C) 2001, 2002  Juha Yrjölä <juha.yrjola@iki.fi>
  * All rights reserved.
  *
  * PKCS#15 PIN code test
@@ -128,7 +128,7 @@ static void print_prkey(const struct sc_pkcs15_object *obj)
 		}
 	printf("\n");
 	if (obj->type == SC_PKCS15_TYPE_PRKEY_RSA)
-		printf("\tModLength   : %lu\n", 
+		printf("\tModLength   : %lu\n",
 			(unsigned long) prkey->modulus_length);
 	printf("\tKey ref     : %d\n", prkey->key_reference);
 	printf("\tNative      : %s\n", prkey->native ? "yes" : "no");
@@ -235,14 +235,6 @@ void sc_test_print_object(const struct sc_pkcs15_object *obj)
 	case SC_PKCS15_TYPE_PUBKEY_RSA:
 		printer = print_pubkey;
 		kind = "Public RSA key";
-		break;
-	case SC_PKCS15_TYPE_PRKEY_DSA:
-		printer = print_prkey;
-		kind = "Private DSA key";
-		break;
-	case SC_PKCS15_TYPE_PUBKEY_DSA:
-		printer = print_pubkey;
-		kind = "Public DSA key";
 		break;
 	case SC_PKCS15_TYPE_CERT_X509:
 		printer = print_cert_x509;

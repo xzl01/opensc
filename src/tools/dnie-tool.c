@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -75,7 +75,7 @@ static const char *option_help[] = {
 	"Show DNIe number, Name, and SurName",
 	"Show DNIe serial number",
 	"Display all the information available",
-	"Verbose operation. Use several times to enable debug output."
+	"Verbose operation, may be used several times",
 };
 
 /*  Get DNIe device extra information  */
@@ -133,6 +133,9 @@ int main(int argc, char* argv[])
 
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
 		fprintf(stderr, "Error: Failed to establish context: %s\n",
@@ -149,7 +152,7 @@ int main(int argc, char* argv[])
 		goto dnie_tool_end;
 	}
 	
-	if (util_connect_card(ctx, &card, opt_reader, opt_wait, verbose) ) {
+	if (util_connect_card(ctx, &card, opt_reader, opt_wait) ) {
 		fprintf(stderr, "Error: Cannot connect with card\n");
 		err = -1;
 		goto dnie_tool_end;

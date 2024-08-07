@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /**
@@ -59,7 +59,8 @@ extern "C" {
 #define SC_SEC_OPERATION_DERIVE         0x0004
 #define SC_SEC_OPERATION_WRAP		0x0005
 #define SC_SEC_OPERATION_UNWRAP		0x0006
-
+#define SC_SEC_OPERATION_ENCRYPT_SYM	0x0007
+#define SC_SEC_OPERATION_DECRYPT_SYM	0x0008
 /* sc_security_env flags */
 #define SC_SEC_ENV_ALG_REF_PRESENT	0x0001
 #define SC_SEC_ENV_FILE_REF_PRESENT	0x0002
@@ -75,8 +76,7 @@ extern "C" {
 
 /* PK algorithms */
 #define SC_ALGORITHM_RSA		0
-#define SC_ALGORITHM_DSA		1
-#define SC_ALGORITHM_EC			2
+#define SC_ALGORITHM_EC		2
 #define SC_ALGORITHM_GOSTR3410		3
 #define SC_ALGORITHM_EDDSA		4
 #define SC_ALGORITHM_XEDDSA		5
@@ -109,13 +109,15 @@ extern "C" {
  * must support at least one of them, and exactly one of them must be selected
  * for a given operation. */
 #define SC_ALGORITHM_RSA_RAW		0x00000001
-#define SC_ALGORITHM_RSA_PADS		0x0000003F
+#define SC_ALGORITHM_RSA_PADS		0x000000FF
 #define SC_ALGORITHM_RSA_PAD_NONE	0x00000001
-#define SC_ALGORITHM_RSA_PAD_PKCS1	0x00000002 /* PKCS#1 v1.5 padding */
 #define SC_ALGORITHM_RSA_PAD_ANSI	0x00000004
 #define SC_ALGORITHM_RSA_PAD_ISO9796	0x00000008
 #define SC_ALGORITHM_RSA_PAD_PSS	0x00000010 /* PKCS#1 v2.0 PSS */
 #define SC_ALGORITHM_RSA_PAD_OAEP	0x00000020 /* PKCS#1 v2.0 OAEP */
+#define SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01	0x00000040 /* PKCS#1 v1.5 padding type 1 */
+#define SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_02	0x00000080 /* PKCS#1 v1.5 padding type 2 */
+#define SC_ALGORITHM_RSA_PAD_PKCS1	(SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_01 | SC_ALGORITHM_RSA_PAD_PKCS1_TYPE_02) /* PKCS#1 v1.5 (type 1 or 2) */
 
 /* If the card is willing to produce a cryptogram with the following
  * hash values, set these flags accordingly.  The interpretation of the hash
@@ -238,16 +240,16 @@ struct sc_supported_algo_info {
 typedef struct sc_sec_env_param {
 	unsigned int param_type;
 	void* value;
-	unsigned int value_len;
+	size_t value_len;
 } sc_sec_env_param_t;
 
 
 typedef struct sc_security_env {
 	unsigned long flags;
 	int operation;
-	unsigned int algorithm, algorithm_flags;
+	unsigned long algorithm, algorithm_flags;
 
-	unsigned int algorithm_ref;
+	unsigned long algorithm_ref;
 	struct sc_path file_ref;
 	unsigned char key_ref[8];
 	size_t key_ref_len;
@@ -259,7 +261,7 @@ typedef struct sc_security_env {
 } sc_security_env_t;
 
 struct sc_algorithm_id {
-	unsigned int algorithm;
+	unsigned long algorithm;
 	struct sc_object_id oid;
 	void *params;
 };
@@ -298,15 +300,15 @@ struct sc_ec_parameters {
 
 typedef struct sc_algorithm_info {
 	unsigned int algorithm;
-	unsigned int key_length;
-	unsigned int flags;
+	size_t key_length;
+	unsigned long flags;
 
 	union {
 		struct sc_rsa_info {
 			unsigned long exponent;
 		} _rsa;
 		struct sc_ec_info {
-			unsigned ext_flags;
+			unsigned long ext_flags;
 			struct sc_ec_parameters params;
 		} _ec;
 	} u;
@@ -444,7 +446,7 @@ struct sc_pin_cmd_pin {
 	const char *prompt;	/* Prompt to display */
 
 	const unsigned char *data; /* PIN, set to NULL when using pin pad */
-	int len;		/* set to 0 when using pin pad */
+	size_t len;		/* set to 0 when using pin pad */
 
 	size_t min_length;	/* min length of PIN */
 	size_t max_length;	/* max length of PIN */
@@ -652,13 +654,13 @@ struct sc_card_operations {
 	 * @param  idx    index within the file with the data to read
 	 * @param  buf    buffer to the read data
 	 * @param  count  number of bytes to read
-	 * @param  flags  flags for the READ BINARY command (currently not used)
+	 * @param  flags  flags for the READ BINARY command (optional)
 	 * @return number of bytes read or an error code
 	 *
 	 * @see sc_read_binary()
 	 */
 	int (*read_binary)(struct sc_card *card, unsigned int idx,
-			u8 * buf, size_t count, unsigned long flags);
+			u8 * buf, size_t count, unsigned long *flags);
 	/**
 	 * @brief Write data to a binary EF with a single command
 	 *
@@ -706,13 +708,13 @@ struct sc_card_operations {
 	int (*erase_binary)(struct sc_card *card, unsigned int idx,
 			    size_t count, unsigned long flags);
 
-	int (*read_record)(struct sc_card *card, unsigned int rec_nr,
+	int (*read_record)(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
 			   u8 * buf, size_t count, unsigned long flags);
 	int (*write_record)(struct sc_card *card, unsigned int rec_nr,
 			    const u8 * buf, size_t count, unsigned long flags);
 	int (*append_record)(struct sc_card *card, const u8 * buf,
 			     size_t count, unsigned long flags);
-	int (*update_record)(struct sc_card *card, unsigned int rec_nr,
+	int (*update_record)(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
 			     const u8 * buf, size_t count, unsigned long flags);
 
 	/* select_file: Does the equivalent of SELECT FILE command specified
@@ -721,6 +723,16 @@ struct sc_card_operations {
 	int (*select_file)(struct sc_card *card, const struct sc_path *path,
 			   struct sc_file **file_out);
 	int (*get_response)(struct sc_card *card, size_t *count, u8 *buf);
+	/**
+	 * Get random data from the card
+	 *
+	 * Implementation of this call back is optional and may be NULL.
+	 *
+	 * @param  card   struct sc_card object on which to issue the command
+	 * @param  buf    buffer to be filled with random data
+	 * @param  count  number of random bytes to initialize
+	 * @return number of random bytes successfully initialized (i.e. `count` or less bytes) or an error code
+	 */
 	int (*get_challenge)(struct sc_card *card, u8 * buf, size_t count);
 
 	/*
@@ -805,6 +817,11 @@ struct sc_card_operations {
 	int (*wrap)(struct sc_card *card, u8 *out, size_t outlen);
 
 	int (*unwrap)(struct sc_card *card, const u8 *crgram, size_t crgram_len);
+
+	int (*encrypt_sym)(struct sc_card *card, const u8 *plaintext, size_t plaintext_len,
+			u8 *out, size_t *outlen);
+	int (*decrypt_sym)(struct sc_card *card, const u8 *EncryptedData, size_t EncryptedDataLen,
+			u8 *out, size_t *outlen);
 };
 
 typedef struct sc_card_driver {
@@ -852,10 +869,13 @@ typedef struct {
 #define SC_CTX_FLAG_DISABLE_POPUPS			0x00000010
 #define SC_CTX_FLAG_DISABLE_COLORS			0x00000020
 
+typedef struct ossl3ctx ossl3ctx_t;
+
 typedef struct sc_context {
 	scconf_context *conf;
-	scconf_block *conf_blocks[3];
+	scconf_block *conf_blocks[4];
 	char *app_name;
+	char *exe_path;
 	int debug;
 	unsigned long flags;
 
@@ -874,7 +894,12 @@ typedef struct sc_context {
 	sc_thread_context_t	*thread_ctx;
 	void *mutex;
 
+#ifdef ENABLE_OPENSSL
+	ossl3ctx_t *ossl3ctx;
+#endif
+
 	unsigned int magic;
+	int disable_hw_pkcs1_padding;
 } sc_context_t;
 
 /* APDU handling functions */
@@ -965,6 +990,8 @@ typedef struct {
 	unsigned long flags;
 	/** mutex functions to use (optional) */
 	sc_thread_context_t *thread_ctx;
+	int debug;
+	FILE *debug_file;
 } sc_context_param_t;
 
 /**
@@ -1027,9 +1054,20 @@ sc_reader_t *sc_ctx_get_reader(sc_context_t *ctx, unsigned int i);
  * @param  ctx   pointer to a sc_context_t
  * @param  pcsc_context_handle pointer to the  new context_handle to use
  * @param  pcsc_card_handle pointer to the new card_handle to use
- * @return SC_SUCCESS on success and an error code otherwise.
+ * @return SC_SUCCESS or 1 on success and an error code otherwise.
+ *		a return of 1 indicates to call reinit_card_for, as
+ *		the reader has changed.
  */
 int sc_ctx_use_reader(sc_context_t *ctx, void * pcsc_context_handle, void * pcsc_card_handle);
+
+/**
+ * detect if the given handles are referencing `reader`
+ *
+ * 0 -> handles also point to `reader`
+ * 1 -> handles don't point to `reader`, but to a different reader
+ */
+int
+pcsc_check_reader_handles(sc_context_t *ctx, sc_reader_t *reader, void * pcsc_context_handle, void * pcsc_card_handle);
 
 /**
  * Returns a pointer to the specified sc_reader_t object
@@ -1218,7 +1256,7 @@ int sc_list_files(struct sc_card *card, u8 *buf, size_t buflen);
  * @return number of bytes read or an error code
  */
 int sc_read_binary(struct sc_card *card, unsigned int idx, u8 * buf,
-		   size_t count, unsigned long flags);
+		   size_t count, unsigned long *flags);
 /**
  * @brief Write data to a binary EF
  *
@@ -1272,13 +1310,14 @@ int sc_erase_binary(struct sc_card *card, unsigned int idx,
  * Reads a record from the current (i.e. selected) file.
  * @param  card    struct sc_card object on which to issue the command
  * @param  rec_nr  SC_READ_RECORD_CURRENT or a record number starting from 1
+ * @param  idx     index within the record with the data to read
  * @param  buf     Pointer to a buffer for storing the data
  * @param  count   Number of bytes to read
  * @param  flags   flags (may contain a short file id of a file to select)
  * @retval number of bytes read or an error value
  */
-int sc_read_record(struct sc_card *card, unsigned int rec_nr, u8 * buf,
-		   size_t count, unsigned long flags);
+int sc_read_record(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
+		   u8 * buf, size_t count, unsigned long flags);
 /**
  * Writes data to a record from the current (i.e. selected) file.
  * @param  card    struct sc_card object on which to issue the command
@@ -1304,13 +1343,14 @@ int sc_append_record(struct sc_card *card, const u8 * buf, size_t count,
  * Updates the data of a record from the current (i.e. selected) file.
  * @param  card    struct sc_card object on which to issue the command
  * @param  rec_nr  SC_READ_RECORD_CURRENT or a record number starting from 1
+ * @param  idx     index within the record with the data to read
  * @param  buf     buffer with to the new data to be written
  * @param  count   number of bytes to update
  * @param  flags   flags (may contain a short file id of a file to select)
  * @retval number of bytes written or an error value
  */
-int sc_update_record(struct sc_card *card, unsigned int rec_nr, const u8 * buf,
-		     size_t count, unsigned long flags);
+int sc_update_record(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
+		     const u8 * buf, size_t count, unsigned long flags);
 int sc_delete_record(struct sc_card *card, unsigned int rec_nr);
 
 /* get/put data functions */
@@ -1320,7 +1360,7 @@ int sc_put_data(struct sc_card *, unsigned int, const u8 *, size_t);
 /**
  * Gets challenge from the card (normally random data).
  * @param  card    struct sc_card object on which to issue the command
- * @param  rndout  buffer for the returned random challenge
+ * @param  rndout  buffer for the returned random challenge. Note that the buffer may be only partially initialized on error.
  * @param  len     length of the challenge
  * @return SC_SUCCESS on success and an error code otherwise
  */
@@ -1337,8 +1377,8 @@ int sc_decipher(struct sc_card *card, const u8 * crgram, size_t crgram_len,
 		u8 * out, size_t outlen);
 int sc_compute_signature(struct sc_card *card, const u8 * data,
 			 size_t data_len, u8 * out, size_t outlen);
-int sc_verify(struct sc_card *card, unsigned int type, int ref, const u8 *buf,
-	      size_t buflen, int *tries_left);
+int sc_verify(struct sc_card *card, unsigned int type, int ref, const u8 *pin,
+		size_t pinlen, int *tries_left);
 /**
  * Resets the security status of the card (i.e. withdraw all granted
  * access rights). Note: not all card operating systems support a logout
@@ -1358,6 +1398,11 @@ int sc_reset_retry_counter(struct sc_card *card, unsigned int type,
 			   const u8 *newref, size_t newlen);
 int sc_build_pin(u8 *buf, size_t buflen, struct sc_pin_cmd_pin *pin, int pad);
 
+int sc_encrypt_sym(struct sc_card *card, const u8 *Data, size_t DataLen,
+		u8 *out, size_t *outlen);
+
+int sc_decrypt_sym(struct sc_card *card, const u8 *EncryptedData, size_t EncryptedDataLen,
+		u8 *out, size_t *outlen);
 
 /********************************************************************/
 /*               ISO 7816-9 related functions                       */
@@ -1539,6 +1584,10 @@ int sc_base64_decode(const char *in, u8 *out, size_t outlen);
 void sc_mem_clear(void *ptr, size_t len);
 void *sc_mem_secure_alloc(size_t len);
 void sc_mem_secure_free(void *ptr, size_t len);
+#define sc_mem_secure_clear_free(ptr, len) do { \
+	sc_mem_clear(ptr, len); \
+	sc_mem_secure_free(ptr, len); \
+} while (0);
 int sc_mem_reverse(unsigned char *buf, size_t len);
 
 int sc_get_cache_dir(sc_context_t *ctx, char *buf, size_t bufsize);
@@ -1558,17 +1607,17 @@ void sc_invalidate_cache(struct sc_card *card);
 void sc_print_cache(struct sc_card *card);
 
 struct sc_algorithm_info * sc_card_find_rsa_alg(struct sc_card *card,
-		unsigned int key_length);
+		size_t key_length);
 struct sc_algorithm_info * sc_card_find_ec_alg(struct sc_card *card,
-		unsigned int field_length, struct sc_object_id *curve_oid);
+		size_t field_length, struct sc_object_id *curve_oid);
 struct sc_algorithm_info * sc_card_find_eddsa_alg(struct sc_card *card,
-		unsigned int field_length, struct sc_object_id *curve_oid);
+		size_t field_length, struct sc_object_id *curve_oid);
 struct sc_algorithm_info * sc_card_find_xeddsa_alg(struct sc_card *card,
-		unsigned int field_length, struct sc_object_id *curve_oid);
+		size_t field_length, struct sc_object_id *curve_oid);
 struct sc_algorithm_info * sc_card_find_gostr3410_alg(struct sc_card *card,
-		unsigned int key_length);
+		size_t key_length);
 struct sc_algorithm_info * sc_card_find_alg(sc_card_t *card,
-		unsigned int algorithm, unsigned int key_length, void *param);
+		unsigned int algorithm, size_t key_length, void *param);
 
 scconf_block *sc_match_atr_block(sc_context_t *ctx, struct sc_card_driver *driver, struct sc_atr *atr);
 /**
@@ -1623,7 +1672,7 @@ extern const char *sc_get_version(void);
 
 extern sc_card_driver_t *sc_get_iso7816_driver(void);
 
-/** 
+/**
  * @brief Read a complete EF by short file identifier.
  *
  * @param[in]     card   card
@@ -1690,7 +1739,7 @@ iso7816_build_pin_apdu(struct sc_card *card, struct sc_apdu *apdu,
 /**
  * Free a buffer returned by OpenSC.
  * Use this instead your C libraries free() to free memory allocated by OpenSC.
- * For more details see <https://github.com/OpenSC/OpenSC/issues/2054> 
+ * For more details see <https://github.com/OpenSC/OpenSC/issues/2054>
  *
  * @param[in] p the buffer
  */

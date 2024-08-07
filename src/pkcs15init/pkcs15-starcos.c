@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -83,7 +83,7 @@ static int starcos_init_card(sc_profile_t *profile, sc_pkcs15_card_t *p15card)
 	sc_file_t	*mf_file, *isf_file, *ipf_file;
 	sc_path_t	tpath;
 	u8		*p = mf_data.data.mf.header, tmp = 0;
-	sc_pkcs15_auth_info_t sopin;
+	sc_pkcs15_auth_info_t sopin = {0};
 
 	/* test if we already have a MF */
 	memset(&tpath, 0, sizeof(sc_path_t));
@@ -158,7 +158,7 @@ static int starcos_init_card(sc_profile_t *profile, sc_pkcs15_card_t *p15card)
 	*p = ipf_file->size & 0xff;
 	ret  = sc_card_ctl(card, SC_CARDCTL_STARCOS_CREATE_FILE, &ipf_data);
 	if (ret != SC_SUCCESS) {
-		free(ipf_file);
+		sc_file_free(ipf_file);
 		return ret;
 	}
 	/* init IPF */
@@ -180,7 +180,7 @@ static int starcos_create_dir(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	sc_starcos_create_data df_data, ipf_data;
 	sc_file_t	*isf_file, *ipf_file;
 	u8		*p = df_data.data.df.header, tmp = 0;
-	sc_pkcs15_auth_info_t sopin;
+	sc_pkcs15_auth_info_t sopin = {0};
 
 	sc_profile_get_pin_info(profile, SC_PKCS15INIT_SO_PIN, &sopin);
 
@@ -239,7 +239,7 @@ static int starcos_create_dir(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	*p = ipf_file->size & 0xff;
 	ret  = sc_card_ctl(card, SC_CARDCTL_STARCOS_CREATE_FILE, &ipf_data);
 	if (ret != SC_SUCCESS) {
-		free(ipf_file);
+		sc_file_free(ipf_file);
 		return ret;
 	}
 	/* init IPF */
@@ -255,7 +255,7 @@ static int starcos_create_dir(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 
 static int have_onepin(sc_profile_t *profile)
 {
-	sc_pkcs15_auth_info_t sopin;
+	sc_pkcs15_auth_info_t sopin = {0};
 
 	sc_profile_get_pin_info(profile, SC_PKCS15INIT_SO_PIN, &sopin);
 
@@ -428,7 +428,7 @@ static int starcos_create_pin(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 		return r;
 
 	if (puk && puk_len) {
-		sc_pkcs15_auth_info_t puk_info;
+		sc_pkcs15_auth_info_t puk_info = {0};
 
 		if (puk_len > 8)
 			return SC_ERROR_INVALID_ARGUMENTS;
@@ -611,7 +611,7 @@ static int starcos_encode_pukey(struct sc_pkcs15_prkey_rsa *rsa, u8 *buf,
 	if (!rsa) {
 		if (!buf)
 			/* if buf == NULL return length of the encoded key */
-			return (int) 12 + (kinfo->modulus_length >> 3);
+			return 12 + (int)(kinfo->modulus_length >> 3);
 		*p++ = 0x06;			/* length key header */
 		*p++ = 0x01; 			/* CHA byte */
 		*p++ = 0x01;
@@ -622,11 +622,11 @@ static int starcos_encode_pukey(struct sc_pkcs15_prkey_rsa *rsa, u8 *buf,
 		*p = (u8) kinfo->key_reference;	/* CHA byte */
 	} else {
 		/* encode normal public key  */
-		size_t	mod_len = rsa->modulus.len  & 0xff,
-			exp_len = rsa->exponent.len & 0xff;
+		int	mod_len = (int)rsa->modulus.len  & 0xff,
+			exp_len = (int)rsa->exponent.len & 0xff;
 
 		if (!buf)
-			return (int) 8 + mod_len + exp_len + 1;
+			return 8 + mod_len + exp_len + 1;
 
 		*p++ = 0x06;			/* length key header */
 		*p++ = 0x01; 			/* CHA byte */
@@ -675,8 +675,10 @@ static int starcos_write_pukey(sc_profile_t *profile, sc_card_t *card,
 		return SC_ERROR_OUT_OF_MEMORY;
 	/* read the complete IPF */
 	r = sc_read_binary(card, 0, buf, len, 0);
-	if (r < 0 || r != (int)len)
+	if (r < 0 || r != (int)len) {
+		free(buf);
 		return r;
+	}
 	/* get/fix number of keys */
 	num_keys = buf[0];
 	if (num_keys == 0xff)
@@ -709,11 +711,13 @@ static int starcos_write_pukey(sc_profile_t *profile, sc_card_t *card,
 	/* updated IPF (XXX: currently append only) */
 	num_keys++;
 	r = sc_update_binary(card, 0, &num_keys, 1, 0);
-	if (r < 0)
+	if (r < 0) {
+		free(buf);
 		return r;
+	}
 	endpos = starcos_ipf_get_lastpos(buf, len);
 	free(buf);
-	return sc_update_binary(card, endpos, key, keylen + 12, 0);
+	return sc_update_binary(card, (unsigned)endpos, key, keylen + 12, 0);
 }
 
 static int starcos_create_key(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
@@ -798,7 +802,7 @@ static int starcos_store_key(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	sc_starcos_wkey_data tkey;
 
 	if (key->algorithm != SC_ALGORITHM_RSA)
-		/* ignore DSA keys */
+		/* ignore non-RSA keys */
 		return SC_ERROR_INVALID_ARGUMENTS;
 
 	/* create sc_starcos_wkey_data */

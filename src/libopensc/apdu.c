@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -322,13 +322,13 @@ sc_check_apdu(sc_card_t *card, const sc_apdu_t *apdu)
 error:
 	sc_log(card->ctx, "Invalid Case %d %s APDU:\n"
 		"cse=%02x cla=%02x ins=%02x p1=%02x p2=%02x lc=%lu le=%lu\n"
-		"resp=%p resplen=%lu data=%p datalen=%lu",
+		"resp=%p resplen=%lu data=%p datalen=%lu flags=0x%8.8lx",
 		apdu->cse & SC_APDU_SHORT_MASK,
 		(apdu->cse & SC_APDU_EXT) != 0 ? "extended" : "short",
 		apdu->cse, apdu->cla, apdu->ins, apdu->p1, apdu->p2,
 		(unsigned long) apdu->lc, (unsigned long) apdu->le,
 		apdu->resp, (unsigned long) apdu->resplen,
-		apdu->data, (unsigned long) apdu->datalen);
+		apdu->data, (unsigned long) apdu->datalen, apdu->flags);
 	return SC_ERROR_INVALID_ARGUMENTS;
 }
 
@@ -402,8 +402,8 @@ sc_set_le_and_transmit(struct sc_card *card, struct sc_apdu *apdu, size_t olen)
 	apdu->resplen = olen;
 	apdu->le      = nlen;
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-	/* Belpic V1 applets have a problem: if the card sends a 6C XX (only XX bytes available), 
-	 * and we resend the command too soon (i.e. the reader is too fast), the card doesn't respond. 
+	/* Belpic V1 applets have a problem: if the card sends a 6C XX (only XX bytes available),
+	 * and we resend the command too soon (i.e. the reader is too fast), the card doesn't respond.
 	 * So we build in a delay. */
 	if (card->type == SC_CARD_TYPE_BELPIC_EID)
 		msleep(40);
@@ -455,6 +455,10 @@ sc_get_response(struct sc_card *card, struct sc_apdu *apdu, size_t olen)
 		unsigned char resp[256];
 		size_t resp_len = le;
 
+		/* we have all the data the caller requested even if the card has more data */
+		if (buflen == 0)
+			break;
+
 		/* call GET RESPONSE to get more date from the card;
 		 * note: GET RESPONSE returns the left amount of data (== SW2) */
 		memset(resp, 0, sizeof(resp));
@@ -477,10 +481,6 @@ sc_get_response(struct sc_card *card, struct sc_apdu *apdu, size_t olen)
 		memcpy(buf, resp, le);
 		buf    += le;
 		buflen -= le;
-
-		/* we have all the data the caller requested even if the card has more data */
-		if (buflen == 0)
-			break;
 
 		minlen -= le;
 		if (rv != 0)
@@ -521,18 +521,20 @@ sc_transmit(sc_card_t *card, sc_apdu_t *apdu)
 	 * 1. the card returned 0x6Cxx: in this case APDU will be re-transmitted with Le set to SW2
 	 * (possible only if response buffer size is larger than new Le = SW2)
 	 */
-	if (apdu->sw1 == 0x6C && (apdu->flags & SC_APDU_FLAGS_NO_RETRY_WL) == 0)
+	if (apdu->sw1 == 0x6C && (apdu->flags & SC_APDU_FLAGS_NO_RETRY_WL) == 0) {
 		r = sc_set_le_and_transmit(card, apdu, olen);
-	LOG_TEST_RET(ctx, r, "cannot re-transmit APDU ");
+		LOG_TEST_RET(ctx, r, "cannot re-transmit APDU ");
+	}
 
 	/* 2. the card returned 0x61xx: more data can be read from the card
 	 *    using the GET RESPONSE command (mostly used in the T0 protocol).
 	 *    Unless the SC_APDU_FLAGS_NO_GET_RESP is set we try to read as
 	 *    much data as possible using GET RESPONSE.
 	 */
-	if (apdu->sw1 == 0x61 && (apdu->flags & SC_APDU_FLAGS_NO_GET_RESP) == 0)
+	if (apdu->sw1 == 0x61 && (apdu->flags & SC_APDU_FLAGS_NO_GET_RESP) == 0) {
 		r = sc_get_response(card, apdu, olen);
-	LOG_TEST_RET(ctx, r, "cannot get all data with 'GET RESPONSE'");
+		LOG_TEST_RET(ctx, r, "cannot get all data with 'GET RESPONSE'");
+	}
 
 	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
 }
@@ -561,6 +563,14 @@ int sc_transmit_apdu(sc_card_t *card, sc_apdu_t *apdu)
 		return r;
 	}
 
+#if ENABLE_SM
+	if (card->sm_ctx.sm_mode == SM_MODE_TRANSMIT
+			&& (apdu->flags & SC_APDU_FLAGS_CHAINING) != 0
+			&& (apdu->flags & SC_APDU_FLAGS_SM_CHAINING) != 0) {
+		sc_log(card->ctx,"Let SM do the chaining");
+		r = sc_transmit(card, apdu);
+	} else
+#endif
 	if ((apdu->flags & SC_APDU_FLAGS_CHAINING) != 0) {
 		/* divide et impera: transmit APDU in chunks with Lc <= max_send_size
 		 * bytes using command chaining */
@@ -585,9 +595,8 @@ int sc_transmit_apdu(sc_card_t *card, sc_apdu_t *apdu)
 				 *      secure messaging is used */
 				plen          = max_send_size;
 				tapdu.cla    |= 0x10;
+				/* the intermediate APDU don't expect response data */
 				tapdu.le      = 0;
-				/* the intermediate APDU don't expect data */
-				tapdu.lc      = 0;
 				tapdu.resplen = 0;
 				tapdu.resp    = NULL;
 			} else {

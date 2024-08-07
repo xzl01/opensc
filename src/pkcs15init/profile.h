@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _OPENSC_PROFILE_H
@@ -120,7 +120,6 @@ struct sc_profile {
 	unsigned int		pin_attempts;
 	unsigned int		puk_attempts;
 	unsigned int		rsa_access_flags;
-	unsigned int		dsa_access_flags;
 
 	struct {
 		unsigned int	direct_certificates;

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef __sc_pkcs11_h__
@@ -105,7 +105,10 @@ struct sc_pkcs11_object_ops {
 			CK_MECHANISM_PTR,
 			CK_BYTE_PTR pEncryptedData, CK_ULONG ulEncryptedDataLen,
 			CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen);
-
+	CK_RV (*encrypt)(struct sc_pkcs11_session *, void *,
+			CK_MECHANISM_PTR,
+			CK_BYTE_PTR pData, CK_ULONG ulDataLen,
+			CK_BYTE_PTR pEncryptedData, CK_ULONG_PTR pulEncryptedDataLen);
 	CK_RV (*derive)(struct sc_pkcs11_session *, void *,
 			CK_MECHANISM_PTR,
 			CK_BYTE_PTR pSeedData, CK_ULONG ulSeedDataLen,
@@ -223,8 +226,30 @@ struct sc_pkcs11_slot {
 	struct sc_app_info *app_info;	/* Application associated to slot */
 	list_t logins;			/* tracks all calls to C_Login if atomic operations are requested */
 	int flags;
+	struct pkcs15_any_object *profile; /* keeps track of the profile object */
 };
 typedef struct sc_pkcs11_slot sc_pkcs11_slot_t;
+
+#define SC_LOG_RV(fmt, rv)\
+do {\
+        const char *name = lookup_enum(RV_T, (rv));\
+        if (name)\
+                sc_log(context, (fmt), name);\
+        else {\
+                size_t needed = snprintf(NULL, 0, "0x%08lX", (rv)) + 1;\
+                char *buffer = malloc(needed);\
+                if (buffer) {\
+                        sprintf(buffer, "0x%08lX", (rv));\
+                        sc_log(context, (fmt), buffer);\
+                        free(buffer);\
+                }\
+        }\
+} while(0)
+
+#define SC_LOG(fmt) \
+	do { \
+		sc_log(context, (fmt)); \
+	} while (0)
 
 /* Debug virtual slots. S is slot to be highlighted or NULL
  * C is a comment format string and args It will be preceded by "VSS " */
@@ -242,17 +267,20 @@ enum {
 	SC_PKCS11_OPERATION_VERIFY,
 	SC_PKCS11_OPERATION_DIGEST,
 	SC_PKCS11_OPERATION_DECRYPT,
+	SC_PKCS11_OPERATION_ENCRYPT,
 	SC_PKCS11_OPERATION_DERIVE,
 	SC_PKCS11_OPERATION_WRAP,
 	SC_PKCS11_OPERATION_UNWRAP,
 	SC_PKCS11_OPERATION_MAX
 };
 
+#define MAX_KEY_TYPES 2
+
 /* This describes a PKCS11 mechanism */
 struct sc_pkcs11_mechanism_type {
-	CK_MECHANISM_TYPE mech;		/* algorithm: md5, sha1, ... */
-	CK_MECHANISM_INFO mech_info;	/* mechanism info */
-	CK_MECHANISM_TYPE key_type;	/* for sign/decipher ops */
+	CK_MECHANISM_TYPE mech;				/* algorithm: md5, sha1, ... */
+	CK_MECHANISM_INFO mech_info;			/* mechanism info */
+	int 		  key_types[MAX_KEY_TYPES];	/* for sign/decipher ops */
 	unsigned int	  obj_size;
 
 	/* General management */
@@ -281,8 +309,23 @@ struct sc_pkcs11_mechanism_type {
 					CK_BYTE_PTR, CK_ULONG);
 	CK_RV		  (*decrypt_init)(sc_pkcs11_operation_t *,
 					struct sc_pkcs11_object *);
+	CK_RV		  (*decrypt_update)(sc_pkcs11_operation_t *,
+					CK_BYTE_PTR, CK_ULONG,
+					CK_BYTE_PTR, CK_ULONG_PTR);
+	CK_RV		  (*decrypt_final)(sc_pkcs11_operation_t *,
+					CK_BYTE_PTR, CK_ULONG_PTR);
 	CK_RV		  (*decrypt)(sc_pkcs11_operation_t *,
 					CK_BYTE_PTR, CK_ULONG,
+					CK_BYTE_PTR, CK_ULONG_PTR);
+	CK_RV		  (*encrypt_init)(sc_pkcs11_operation_t *,
+					struct sc_pkcs11_object *);
+	CK_RV		  (*encrypt)(sc_pkcs11_operation_t *,
+					CK_BYTE_PTR, CK_ULONG,
+					CK_BYTE_PTR, CK_ULONG_PTR);
+	CK_RV		  (*encrypt_update)(sc_pkcs11_operation_t *,
+					CK_BYTE_PTR, CK_ULONG,
+					CK_BYTE_PTR, CK_ULONG_PTR);
+	CK_RV		  (*encrypt_final)(sc_pkcs11_operation_t *,
 					CK_BYTE_PTR, CK_ULONG_PTR);
 	CK_RV		  (*derive)(sc_pkcs11_operation_t *,
 					struct sc_pkcs11_object *,
@@ -301,6 +344,7 @@ struct sc_pkcs11_mechanism_type {
 	const void *  mech_data;
 	/* free mechanism specific data */
 	void		  (*free_mech_data)(const void *mech_data);
+	CK_RV		  (*copy_mech_data)(const void *mech_data, void **new_data);
 };
 typedef struct sc_pkcs11_mechanism_type sc_pkcs11_mechanism_type_t;
 
@@ -358,8 +402,9 @@ void strcpy_bp(u8 *dst, const char *src, size_t dstsize);
 CK_RV sc_to_cryptoki_error(int rc, const char *ctx);
 void sc_pkcs11_print_attrs(int level, const char *file, unsigned int line, const char *function,
 		const char *info, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount);
+void sc_pkcs11_card_free(struct sc_pkcs11_card *p11card);
 #define dump_template(level, info, pTemplate, ulCount) \
-		sc_pkcs11_print_attrs(level, __FILE__, __LINE__, __FUNCTION__, \
+		sc_pkcs11_print_attrs(level, FILENAME, __LINE__, __FUNCTION__, \
 				info, pTemplate, ulCount)
 
 /* Slot and card handling functions */
@@ -374,6 +419,7 @@ CK_RV slot_token_removed(CK_SLOT_ID id);
 CK_RV slot_allocate(struct sc_pkcs11_slot **, struct sc_pkcs11_card *);
 CK_RV slot_find_changed(CK_SLOT_ID_PTR idp, int mask);
 int slot_get_logged_in_state(struct sc_pkcs11_slot *slot);
+int slot_get_card_state(struct sc_pkcs11_slot *slot);
 
 /* Login tracking functions */
 CK_RV restore_login_state(struct sc_pkcs11_slot *slot);
@@ -415,7 +461,7 @@ CK_RV attr_extract(CK_ATTRIBUTE_PTR, void *, size_t *);
 
 /* Generic Mechanism functions */
 CK_RV sc_pkcs11_register_mechanism(struct sc_pkcs11_card *,
-				sc_pkcs11_mechanism_type_t *);
+				sc_pkcs11_mechanism_type_t *, sc_pkcs11_mechanism_type_t **);
 CK_RV sc_pkcs11_get_mechanism_list(struct sc_pkcs11_card *,
 				CK_MECHANISM_TYPE_PTR, CK_ULONG_PTR);
 CK_RV sc_pkcs11_get_mechanism_info(struct sc_pkcs11_card *, CK_MECHANISM_TYPE,
@@ -424,28 +470,37 @@ CK_RV sc_pkcs11_md_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR);
 CK_RV sc_pkcs11_md_update(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG);
 CK_RV sc_pkcs11_md_final(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV sc_pkcs11_sign_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR,
-				struct sc_pkcs11_object *, CK_MECHANISM_TYPE);
+				struct sc_pkcs11_object *, CK_KEY_TYPE);
 CK_RV sc_pkcs11_sign_update(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG);
 CK_RV sc_pkcs11_sign_final(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV sc_pkcs11_sign_size(struct sc_pkcs11_session *, CK_ULONG_PTR);
 #ifdef ENABLE_OPENSSL
 CK_RV sc_pkcs11_verif_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR,
-				struct sc_pkcs11_object *, CK_MECHANISM_TYPE);
+				struct sc_pkcs11_object *, CK_KEY_TYPE);
 CK_RV sc_pkcs11_verif_update(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG);
 CK_RV sc_pkcs11_verif_final(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG);
 #endif
-CK_RV sc_pkcs11_decr_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_MECHANISM_TYPE);
+CK_RV sc_pkcs11_decr_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_KEY_TYPE);
 CK_RV sc_pkcs11_decr(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV sc_pkcs11_decr_update(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV sc_pkcs11_decr_final(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG_PTR);
+
+CK_RV sc_pkcs11_encr_init(struct sc_pkcs11_session *, CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_MECHANISM_TYPE);
+CK_RV sc_pkcs11_encr(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV sc_pkcs11_encr_update(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+CK_RV sc_pkcs11_encr_final(struct sc_pkcs11_session *, CK_BYTE_PTR, CK_ULONG_PTR);
+
 CK_RV sc_pkcs11_wrap(struct sc_pkcs11_session *,CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_KEY_TYPE, struct sc_pkcs11_object *, CK_BYTE_PTR, CK_ULONG_PTR);
 CK_RV sc_pkcs11_unwrap(struct sc_pkcs11_session *,CK_MECHANISM_PTR, struct sc_pkcs11_object *, CK_KEY_TYPE, CK_BYTE_PTR, CK_ULONG, struct sc_pkcs11_object *);
 CK_RV sc_pkcs11_deri(struct sc_pkcs11_session *, CK_MECHANISM_PTR,
 				struct sc_pkcs11_object *, CK_KEY_TYPE,
 				CK_SESSION_HANDLE, CK_OBJECT_HANDLE, struct sc_pkcs11_object *);
 sc_pkcs11_mechanism_type_t *sc_pkcs11_find_mechanism(struct sc_pkcs11_card *,
-				CK_MECHANISM_TYPE, unsigned int);
+				CK_MECHANISM_TYPE, CK_FLAGS);
 sc_pkcs11_mechanism_type_t *sc_pkcs11_new_fw_mechanism(CK_MECHANISM_TYPE,
 				CK_MECHANISM_INFO_PTR, CK_KEY_TYPE,
-				const void *, void (*)(const void *));
+				const void *, void (*)(const void *), CK_RV (*)(const void *, void **));
+void sc_pkcs11_free_mechanism(sc_pkcs11_mechanism_type_t **mt);
 sc_pkcs11_operation_t *sc_pkcs11_new_operation(sc_pkcs11_session_t *,
 				sc_pkcs11_mechanism_type_t *);
 void sc_pkcs11_release_operation(sc_pkcs11_operation_t **);
@@ -458,11 +513,11 @@ CK_RV sc_pkcs11_register_sign_and_hash_mechanism(struct sc_pkcs11_card *,
 				sc_pkcs11_mechanism_type_t *);
 
 #ifdef ENABLE_OPENSSL
-CK_RV sc_pkcs11_verify_data(const unsigned char *pubkey, unsigned int pubkey_len,
-	const unsigned char *pubkey_params, unsigned int pubkey_params_len,
+CK_RV sc_pkcs11_verify_data(const CK_BYTE_PTR pubkey, CK_ULONG pubkey_len,
+	const CK_BYTE_PTR pubkey_params, CK_ULONG pubkey_params_len,
 	CK_MECHANISM_PTR mech, sc_pkcs11_operation_t *md,
-	unsigned char *inp, unsigned int inp_len,
-	unsigned char *signat, unsigned int signat_len);
+	CK_BYTE_PTR inp, CK_ULONG inp_len,
+	CK_BYTE_PTR signat, CK_ULONG signat_len);
 #endif
 
 /* Load configuration defaults */
